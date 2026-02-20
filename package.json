@@ -1,0 +1,31 @@
+{
+    "name": "signal-based-trading-bot",
+    "version": "1.0.0",
+    "description": "Clean signal-based trading bot with admin dashboard",
+    "main": "index.js",
+    "scripts": {
+        "start": "node index.js",
+        "dev": "nodemon index.js",
+        "dashboard": "node dashboard/server.js"
+    },
+    "keywords": [
+        "trading",
+        "binance",
+        "futures",
+        "signals"
+    ],
+    "author": "",
+    "license": "ISC",
+    "dependencies": {
+        "binance-api-node": "^0.12.5",
+        "dotenv": "^16.0.3",
+        "express": "^4.18.2",
+        "cors": "^2.8.5",
+        "aws-sdk": "^2.1490.0",
+        "ws": "^8.14.2",
+        "uuid": "^9.0.1"
+    },
+    "devDependencies": {
+        "nodemon": "^3.0.1"
+    }
+}

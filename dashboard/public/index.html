@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Signal Trading Bot - Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>🎯 Signal Trading Bot Dashboard</h1>
+            <div class="header-stats">
+                <div class="stat-card">
+                    <span class="stat-label">Balance</span>
+                    <span class="stat-value" id="balance">$0.00</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Active Positions</span>
+                    <span class="stat-value" id="activePositions">0</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Win Rate</span>
+                    <span class="stat-value" id="winRate">0%</span>
+                </div>
+                <div class="stat-card">
+                    <span class="stat-label">Net PnL</span>
+                    <span class="stat-value" id="netPnl">$0.00</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Trade Signal Form -->
+        <div class="section">
+            <h2>📨 Submit Trade Signal</h2>
+            <form id="tradeForm" class="trade-form">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="symbol">Symbol <span id="symbolPrice" style="color: #667eea; font-weight: 600;"></span></label>
+                        <input type="text" id="symbol" list="symbolList" placeholder="Search symbol (e.g., BTC, ETH, SOL...)" required autocomplete="off">
+                        <datalist id="symbolList">
+                        </datalist>
+                        <small style="color: #888;">Type to search from 400+ coins</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="side">Side</label>
+                        <select id="side" required>
+                            <option value="LONG">LONG</option>
+                            <option value="SHORT">SHORT</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="orderType">Order Type</label>
+                        <select id="orderType" required>
+                            <option value="MARKET">Market</option>
+                            <option value="LIMIT">Limit</option>
+                        </select>
+                    </div>
+                    <div class="form-group" id="limitPriceGroup" style="display: none;">
+                        <label for="limitPrice">Limit Price</label>
+                        <input type="number" id="limitPrice" step="0.00000001" placeholder="0.00">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="walletPercentage">Wallet % (1-100)</label>
+                        <input type="number" id="walletPercentage" min="1" max="100" value="10" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="leverage">Leverage (1-125)</label>
+                        <input type="number" id="leverage" min="1" max="125" value="10" required>
+                        <small id="leverageInfo" style="color: #667eea; font-weight: 600;">Select a symbol to see max
+                            leverage</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="riskMode">Risk Mode</label>
+                        <select id="riskMode" required>
+                            <option value="isolated">Isolated</option>
+                            <option value="crossed">Crossed</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label for="stopLoss">Stop Loss Price</label>
+                        <input type="number" id="stopLoss" step="0.00000001" required>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="takeProfit1">Take Profit 1 (33%)</label>
+                        <input type="number" id="takeProfit1" step="0.00000001" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="takeProfit2">Take Profit 2 (33%)</label>
+                        <input type="number" id="takeProfit2" step="0.00000001" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="takeProfit3">Take Profit 3 (34%)</label>
+                        <input type="number" id="takeProfit3" step="0.00000001" required>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="ctcLevel">CTC (Close to Cost)</label>
+                        <select id="ctcLevel" required>
+                            <option value="NONE">Disabled</option>
+                            <option value="TP1">After TP1</option>
+                            <option value="TP2">After TP2</option>
+                        </select>
+                        <small>Move SL to break-even after selected TP hits</small>
+                    </div>
+                    <div class="form-group">
+                        <label>&nbsp;</label>
+                        <div style="padding: 12px; background: #f0f0f0; border-radius: 8px; font-size: 0.9em;">
+                            <strong>💡 Tip:</strong> Leverage and Risk Mode are set per trade
+                        </div>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary">Execute Trade</button>
+                
+                <!-- Risk/Reward Calculator -->
+                <div id="riskRewardDisplay" style="display: none; margin-top: 20px; padding: 20px; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); border-radius: 10px;">
+                    <h3 style="margin-bottom: 15px; color: #333;">📊 Trade Analysis</h3>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                        <div>
+                            <div style="font-size: 0.9em; color: #666; margin-bottom: 5px;">Position Size</div>
+                            <div id="rrPositionSize" style="font-size: 1.3em; font-weight: 700; color: #333;">-</div>
+                        </div>
+                        <div style="background: #fee; padding: 10px; border-radius: 8px; border-left: 4px solid #e74c3c;">
+                            <div style="font-size: 0.9em; color: #666; margin-bottom: 5px;">🔻 Risk (SL)</div>
+                            <div id="rrRisk" style="font-size: 1.3em; font-weight: 700; color: #e74c3c;">-</div>
+                        </div>
+                        <div style="background: #efe; padding: 10px; border-radius: 8px; border-left: 4px solid #27ae60;">
+                            <div style="font-size: 0.9em; color: #666; margin-bottom: 5px;">🎯 TP1 Profit</div>
+                            <div id="rrTP1" style="font-size: 1.3em; font-weight: 700; color: #27ae60;">-</div>
+                        </div>
+                        <div style="background: #efe; padding: 10px; border-radius: 8px; border-left: 4px solid #27ae60;">
+                            <div style="font-size: 0.9em; color: #666; margin-bottom: 5px;">🎯 TP2 Profit</div>
+                            <div id="rrTP2" style="font-size: 1.3em; font-weight: 700; color: #27ae60;">-</div>
+                        </div>
+                        <div style="background: #efe; padding: 10px; border-radius: 8px; border-left: 4px solid #27ae60;">
+                            <div style="font-size: 0.9em; color: #666; margin-bottom: 5px;">🎯 TP3 Profit</div>
+                            <div id="rrTP3" style="font-size: 1.3em; font-weight: 700; color: #27ae60;">-</div>
+                        </div>
+                        <div style="background: #e3f2fd; padding: 10px; border-radius: 8px; border-left: 4px solid #2196f3;">
+                            <div style="font-size: 0.9em; color: #666; margin-bottom: 5px;">⚖️ Risk/Reward</div>
+                            <div id="rrRatio" style="font-size: 1.3em; font-weight: 700; color: #2196f3;">-</div>
+                        </div>
+                    </div>
+                </div>
+            </form>
+        </div>
+
+        <!-- Active Positions -->
+        <div class="section">
+            <h2>📊 Active Positions</h2>
+            <div class="table-container">
+                <table id="positionsTable">
+                    <thead>
+                        <tr>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>Entry / Mark</th>
+                            <th>Qty</th>
+                            <th>SL</th>
+                            <th>TP1 / TP2 / TP3</th>
+                            <th>PnL</th>
+                            <th>R:R</th>
+                            <th>Lev</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="positionsBody">
+                        <tr>
+                            <td colspan="10" class="loading">No active positions</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Trade History -->
+        <div class="section">
+            <h2>📋 Trade History</h2>
+            <div class="table-container">
+                <table id="tradesTable">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>Symbol</th>
+                            <th>Side</th>
+                            <th>Type</th>
+                            <th>Entry</th>
+                            <th>Quantity</th>
+                            <th>R:R</th>
+                            <th>PnL</th>
+                            <th>Status</th>
+                            <th>CTC</th>
+                        </tr>
+                    </thead>
+                    <tbody id="tradesBody">
+                        <tr>
+                            <td colspan="10" class="loading">Loading trades...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Statistics -->
+        <div class="section">
+            <h2>📈 Performance Statistics</h2>
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <div class="stat-title">Total Trades</div>
+                    <div class="stat-number" id="totalTrades">0</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-title">Wins</div>
+                    <div class="stat-number stat-win" id="wins">0</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-title">Losses</div>
+                    <div class="stat-number stat-loss" id="losses">0</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-title">Total PnL</div>
+                    <div class="stat-number" id="totalPnl">$0.00</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-title">Total Fees</div>
+                    <div class="stat-number" id="totalFees">$0.00</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-title">Avg PnL</div>
+                    <div class="stat-number" id="avgPnl">$0.00</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+
+</html>
