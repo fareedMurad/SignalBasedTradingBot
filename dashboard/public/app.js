@@ -3,7 +3,8 @@
  * Supports: R:R trade signals, holding candles, CTC % trigger, BUY/SELL direction, $ margin
  */
 
-const API_BASE = 'http://localhost:3000/api';
+// Relative path — works on any host/port automatically (localhost, EC2 IP, domain, etc.)
+const API_BASE = '/api';
 
 // ─────────────────────────────────────────────
 // INIT

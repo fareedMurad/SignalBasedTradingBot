@@ -7,7 +7,7 @@ This document is for the signal provider. Send an HTTP POST request to the bot e
 ## Endpoint
 
 ```
-POST http://<your-server-ip>:<PORT>/api/trade
+POST http://13.232.123.216:3000/api/trade
 Content-Type: application/json
 ```
 

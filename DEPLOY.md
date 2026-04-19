@@ -7,7 +7,7 @@ Follow these steps exactly on your EC2 instance after pulling the folder.
 ## Step 1 — SSH into your EC2
 
 ```bash
-ssh -i your-key.pem ubuntu@your-ec2-public-ip
+ssh -i your-key.pem ubuntu@13.232.123.216
 ```
 
 ---
@@ -76,7 +76,7 @@ npm install -g pm2
 ```bash
 pm2 start dashboard/server.js \
   --name "trading-bot" \
-  --cwd /home/ubuntu/SignalBasedTradingBot \
+  --cwd ~/SignalBasedTradingBot \
   --log logs/bot.log \
   --time
 ```
@@ -138,7 +138,7 @@ Add these rules:
 Open your browser:
 
 ```
-http://your-ec2-public-ip:3000
+http://13.232.123.216:3000
 ```
 
 You'll see the login page. Enter the password from your `.env` → `DASHBOARD_PASSWORD`.
@@ -148,7 +148,7 @@ You'll see the login page. Enter the password from your `.env` → `DASHBOARD_PA
 ## Step 11 — Give signal provider the webhook URL
 
 ```
-POST http://your-ec2-public-ip:3000/api/trade
+POST http://13.232.123.216:3000/api/trade
 ```
 
 The `/api/trade` endpoint **does not require the dashboard password** — it only needs the correct JSON payload.
