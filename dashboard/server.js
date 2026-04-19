@@ -302,9 +302,16 @@ app.post('/api/trade', async (req, res) => {
         if (!signal.side && !signal.direction) {
             return res.status(400).json({ success: false, error: 'Missing required field: side or direction (BUY/SELL)' });
         }
-        if (!signal.stopLoss) {
-            return res.status(400).json({ success: false, error: 'Missing required field: stopLoss' });
+
+        // SL: must have EITHER stopLoss (absolute price) OR slPips (distance from entry)
+        const hasSL = signal.stopLoss || signal.slPips;
+        if (!hasSL) {
+            return res.status(400).json({
+                success: false,
+                error: 'Missing required field: stopLoss (price) OR slPips (distance in USDT from entry)'
+            });
         }
+
         if (!signal.leverage) {
             return res.status(400).json({ success: false, error: 'Missing required field: leverage' });
         }
@@ -312,12 +319,14 @@ app.post('/api/trade', async (req, res) => {
             return res.status(400).json({ success: false, error: 'Missing required field: riskMode' });
         }
 
-        // R:R is always required — bot computes single TP from it
-        if (!signal.rr || signal.rr <= 0) {
-            return res.status(400).json({
-                success: false,
-                error: 'Missing required field: rr (risk:reward ratio, e.g. 2.5)'
-            });
+        // TP: must have EITHER rr OR tpPips (can't compute TP without one of them)
+        if (!signal.tpPips && !signal.takeProfit1) {
+            if (!signal.rr || signal.rr <= 0) {
+                return res.status(400).json({
+                    success: false,
+                    error: 'Missing required field: rr (risk:reward, e.g. 2.5) or tpPips (TP distance in USDT from entry)'
+                });
+            }
         }
 
         // Margin: dollar (default for signal provider) or percent

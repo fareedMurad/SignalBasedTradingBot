@@ -37,9 +37,9 @@ class TradeExecutor {
      * Signal provider provides rr (e.g. 2.5) → tp = entry ± slDist × rr
      *
      * @param {number} entryPrice
-     * @param {number} stopLoss
-     * @param {number} rr  - risk:reward (e.g. 2.5 means 1:2.5)
-     * @param {string} side - 'LONG' or 'SHORT'
+     * @param {number} stopLoss  - actual SL price (already resolved from pips or direct)
+     * @param {number} rr        - risk:reward (e.g. 2.5 means 1:2.5)
+     * @param {string} side      - 'LONG' or 'SHORT'
      * @returns {number} takeProfit1
      */
     computeTPFromRR(entryPrice, stopLoss, rr, side) {
@@ -48,6 +48,66 @@ class TradeExecutor {
         return side === 'LONG'
             ? entryPrice + tpDist
             : entryPrice - tpDist;
+    }
+
+    /**
+     * Resolve stopLoss and takeProfit1 from signal.
+     *
+     * Signal can provide SL/TP in two ways:
+     *   A) Absolute prices:  signal.stopLoss + signal.rr  (or signal.takeProfit1)
+     *   B) Pips distance:    signal.slPips  + signal.rr  (or signal.tpPips)
+     *      → stopLoss = entry ∓ slPips   (BUY: entry − slPips, SELL: entry + slPips)
+     *      → tp       = entry ± slPips × rr  (BUY: entry + slPips×rr, SELL: entry − slPips×rr)
+     *         OR:        entry ± tpPips   when signal provides tpPips directly
+     *
+     * @param {number} entryPrice - actual fill price (for pips mode) or pre-fill estimate
+     * @param {string} side       - 'LONG' | 'SHORT'
+     * @param {object} signal     - raw signal payload
+     * @returns {{ stopLoss: number, takeProfit1: number, slPipsUsed: boolean }}
+     */
+    resolveSLTP(entryPrice, side, signal) {
+        const isLong = side === 'LONG';
+
+        // ── MODE A: absolute price SL provided ───────────────────────────────
+        if (signal.stopLoss) {
+            const stopLoss = signal.stopLoss;
+            let takeProfit1;
+
+            if (signal.takeProfit1) {
+                takeProfit1 = signal.takeProfit1;
+            } else if (signal.tpPips) {
+                takeProfit1 = isLong
+                    ? entryPrice + signal.tpPips
+                    : entryPrice - signal.tpPips;
+            } else {
+                takeProfit1 = this.computeTPFromRR(entryPrice, stopLoss, signal.rr, side);
+            }
+
+            return { stopLoss, takeProfit1, slPipsUsed: false };
+        }
+
+        // ── MODE B: pips distance ─────────────────────────────────────────────
+        if (signal.slPips) {
+            const stopLoss = isLong
+                ? entryPrice - signal.slPips
+                : entryPrice + signal.slPips;
+
+            let takeProfit1;
+            if (signal.tpPips) {
+                takeProfit1 = isLong
+                    ? entryPrice + signal.tpPips
+                    : entryPrice - signal.tpPips;
+            } else {
+                // rr must be present if no tpPips (validated in server.js)
+                takeProfit1 = isLong
+                    ? entryPrice + signal.slPips * signal.rr
+                    : entryPrice - signal.slPips * signal.rr;
+            }
+
+            return { stopLoss, takeProfit1, slPipsUsed: true };
+        }
+
+        throw new Error('Signal must provide either stopLoss or slPips');
     }
 
     /**
@@ -99,22 +159,27 @@ class TradeExecutor {
             const symbolInfo = await this.client.getSymbolInfo(symbol);
             const currentPrice = await this.client.getPrice(symbol);
 
-            // Entry price for calculations
-            const entryPrice = orderType === 'MARKET' ? currentPrice : limitPrice;
+            // Entry price estimate (pre-fill) for pre-validation
+            const estimatedEntry = orderType === 'MARKET' ? currentPrice : (limitPrice || currentPrice);
 
-            // --- Resolve single TP from R:R ---
-            // R:R is always provided by signal provider.
-            // TP = full risk × rr distance (one TP, 100% close at that level).
-            let takeProfit1 = this.computeTPFromRR(entryPrice, stopLoss, signal.rr, side);
-            this.logger.info(
-                `📐 Single TP from R:R ${signal.rr}: TP=${takeProfit1.toFixed(4)} | SL=${stopLoss}`
-            );
+            // --- Resolve SL/TP using estimated entry (pre-fill) for pre-validation ---
+            const { stopLoss: estSL, takeProfit1: estTP } = this.resolveSLTP(estimatedEntry, side, signal);
 
-            // Validate SL/TP direction
-            const validation = this.validateSLTP(side, entryPrice, stopLoss, takeProfit1);
+            const mode = signal.slPips
+                ? `pips (slPips=${signal.slPips}${signal.tpPips ? `, tpPips=${signal.tpPips}` : `, rr=${signal.rr}`})`
+                : `absolute price (SL=${signal.stopLoss}, rr=${signal.rr})`;
+            this.logger.info(`📐 SL/TP mode: ${mode}`);
+            this.logger.info(`📐 Estimated → SL=${estSL.toFixed(4)} | TP=${estTP.toFixed(4)}`);
+
+            // Validate direction (pre-fill estimate)
+            const validation = this.validateSLTP(side, estimatedEntry, estSL, estTP);
             if (!validation.valid) {
                 throw new Error(`❌ Validation Failed: ${validation.error}`);
             }
+
+            // Use estimated SL/TP for pre-validation (actual fill resolves below)
+            let stopLoss = estSL;
+            let takeProfit1 = estTP;
 
             // Set leverage and margin type
             await this.client.setMarginType(symbol, riskMode);
@@ -153,7 +218,7 @@ class TradeExecutor {
 
             // Pre-validate SL/TP orders won't immediately trigger
             this.logger.info('🔍 Pre-validating SL/TP orders...');
-            const testValidation = await this.testSLTPOrders(symbol, side, entryPrice, quantity, {
+            const testValidation = await this.testSLTPOrders(symbol, side, estimatedEntry, quantity, {
                 stopLoss, takeProfit1
             }, symbolInfo);
             if (!testValidation.valid) {
@@ -161,7 +226,7 @@ class TradeExecutor {
             }
             this.logger.info('✅ Pre-validation passed');
 
-            const tpSlConfig = { stopLoss, takeProfit1, ctcEnabled, ctcTrigger };
+            const tpSlConfig = { stopLoss, takeProfit1, ctcEnabled, ctcTrigger, entryPrice: estimatedEntry };
             let entryOrder;
             let softwareSLTP = false;
 
@@ -176,6 +241,18 @@ class TradeExecutor {
 
                 await new Promise(resolve => setTimeout(resolve, 500));
                 const fillPrice = await this.getActualEntryPrice(symbol, currentPrice);
+
+                // ── Re-resolve SL/TP from ACTUAL fill price (critical for pips mode) ──
+                if (signal.slPips) {
+                    const resolved = this.resolveSLTP(fillPrice, side, signal);
+                    stopLoss    = resolved.stopLoss;
+                    takeProfit1 = resolved.takeProfit1;
+                    this.logger.info(`📐 Pips resolved from fill ${fillPrice.toFixed(4)} → SL=${stopLoss.toFixed(4)} | TP=${takeProfit1.toFixed(4)}`);
+                } else {
+                    // Absolute SL stays the same; recompute TP from fill price for accuracy
+                    takeProfit1 = this.resolveSLTP(fillPrice, side, signal).takeProfit1;
+                    this.logger.info(`📐 TP recomputed from fill ${fillPrice.toFixed(4)} → TP=${takeProfit1.toFixed(4)} | SL=${stopLoss.toFixed(4)}`);
+                }
 
                 if (this.client.isTestnet()) {
                     // Testnet blocks STOP_MARKET / TAKE_PROFIT_MARKET (-4120)
@@ -222,11 +299,13 @@ class TradeExecutor {
                 side,
                 orderType,
                 quantity,
-                price: orderType === 'MARKET' ? currentPrice : limitPrice,
+                price:          orderType === 'MARKET' ? currentPrice : limitPrice,
                 stopLoss,
                 takeProfit1,
-                rr: signal.rr,
-                ctcEnabled: !!ctcEnabled,
+                rr:             signal.rr    || null,
+                slPips:         signal.slPips || null,
+                tpPips:         signal.tpPips || null,
+                ctcEnabled:     !!ctcEnabled,
                 ctcTrigger,
                 holdingCandles,
                 tradeStartTime,

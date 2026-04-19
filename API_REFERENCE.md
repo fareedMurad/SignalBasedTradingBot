@@ -1,6 +1,6 @@
 # Signal Provider — Trade Execution API Reference
 
-This document is for the signal provider. Send an HTTP POST request to the bot endpoint to execute a trade.
+Send an HTTP POST request to the bot endpoint to execute a trade.
 
 ---
 
@@ -11,95 +11,140 @@ POST http://13.232.123.216:3000/api/trade
 Content-Type: application/json
 ```
 
-Default port is **3000** (configurable via `DASHBOARD_PORT` in `.env`).
+Default port is **3000** (set `DASHBOARD_PORT` in `.env`).
 
 ---
 
-## Signal Model (how the bot works)
+## SL / TP — Two Modes
+
+The bot accepts SL and TP in **two flavours**. You can mix them freely:
+
+| Mode | SL field | TP field | Notes |
+|------|----------|----------|-------|
+| **Absolute price** | `stopLoss` | `rr` or `takeProfit1` | Classic — send the actual price level |
+| **Pips distance** | `slPips` | `rr` or `tpPips` | New — send how many USDT away from entry |
+
+> **1 pip = 1 USDT** for all Binance Fututes pairs (e.g. BTCUSDT, ETHUSDT).
+
+### Pips math (executed at actual fill price)
+
+```
+BUY  (LONG):
+  SL = fillPrice − slPips
+  TP = fillPrice + slPips × rr      (or fillPrice + tpPips if tpPips provided)
+
+SELL (SHORT):
+  SL = fillPrice + slPips
+  TP = fillPrice − slPips × rr      (or fillPrice − tpPips if tpPips provided)
+```
+
+**Example:** entry fills at 75,660 | `slPips: 150` | `rr: 2.67`
+```
+SL = 75,660 − 150 = 75,510
+TP = 75,660 + 150 × 2.67 = 75,660 + 400.5 = 76,060.5
+```
+
+---
+
+## Signal Model
 
 | Concept | How it works |
 |---------|-------------|
-| **TP** | Single take profit, computed as `entry ± (entry - SL) × rr`. 100% of position closes at this level. |
-| **SL** | If mark price hits SL → 100% close |
-| **CTC** | When price reaches `ctcTrigger × TP_distance` from entry → SL is moved to break-even. Trade continues. |
-| **Holding candles** | After `holdingCandles × 3 minutes` from `entryTime` → force close entire position |
+| **SL** | Absolute price OR computed from `slPips` at fill price |
+| **TP** | Computed from `rr` × SL distance (or `tpPips` directly) — 100% close |
+| **CTC** | When price reaches `ctcTrigger × TP_distance` from entry → SL moves to break-even |
+| **Holding candles** | After `holdingCandles × 3 min` from `entryTime` → force-close |
 
 ---
 
-## Payload Schema
+## Full Payload Schema
 
 ```json
 {
-  "symbol":         "BTCUSDT",       // required — Binance Futures pair
+  "symbol":         "BTCUSDT",       // required
   "direction":      "BUY",           // required — "BUY" (long) | "SELL" (short)
-  "stopLoss":       74000,           // required — stop loss price
-  "rr":             2.5,             // required — risk:reward ratio (e.g. 2.5)
-                                     //   TP = entry + (entry - SL) × 2.5  (for BUY)
-                                     //   TP = entry - (SL - entry) × 2.5  (for SELL)
   "leverage":       10,              // required — 1–125
   "riskMode":       "isolated",      // required — "isolated" | "crossed"
   "marginDollar":   100,             // required — fixed $ margin per trade
 
-  "ctcEnabled":     true,            // optional — enable CTC (default: false)
-  "ctcTrigger":     0.4,             // optional — fraction of TP dist to fire CTC
-                                     //   0.4 = when price moves 40% toward TP → move SL to BE
+  // ── SL (one of these is required) ──────────────────────────────────────
+  "stopLoss":       74000,           // Option A: absolute SL price
+  // OR
+  "slPips":         150,             // Option B: SL distance in USDT from entry
 
-  "holdingCandles": 10,              // optional — close after 10 × 3-min candles from entryTime
-  "entryTime":      1714521600000,   // optional — unix ms of signal birth (for holding countdown)
+  // ── TP (one of these is required unless takeProfit1 is sent) ───────────
+  "rr":             2.67,            // Option A: risk:reward ratio  (e.g. 2.67)
+  // OR
+  "tpPips":         400,             // Option B: TP distance in USDT from entry
 
-  "orderType":      "MARKET"         // optional — "MARKET" (default) | "LIMIT"
+  // ── Optional ───────────────────────────────────────────────────────────
+  "ctcEnabled":     true,            // enable CTC (default: false)
+  "ctcTrigger":     0.4,             // CTC fires at 40% of TP dist from entry (default: 0.5)
+  "holdingCandles": 10,              // force-close after N × 3-min candles
+  "entryTime":      1714521600000,   // unix ms of signal (start of holding countdown)
+  "orderType":      "MARKET"         // "MARKET" (default) | "LIMIT"
 }
 ```
-
-> **Note:** `marginMode` defaults to `"dollar"`. Do not send `walletPercentage`.
 
 ---
 
 ## Example Payloads
 
-### BUY (long) with CTC and holding
+### Mode A — Absolute SL + R:R (existing style unchanged)
 
 ```json
 {
-  "symbol":         "BTCUSDT",
-  "direction":      "BUY",
-  "stopLoss":       74000,
-  "rr":             2.5,
-  "leverage":       10,
-  "riskMode":       "isolated",
-  "marginDollar":   100,
-  "ctcEnabled":     true,
-  "ctcTrigger":     0.4,
-  "holdingCandles": 10,
-  "entryTime":      1714521600000
+  "symbol":       "BTCUSDT",
+  "direction":    "BUY",
+  "leverage":     10,
+  "riskMode":     "isolated",
+  "marginDollar": 100,
+  "stopLoss":     74000,
+  "rr":           2.5
 }
 ```
 
-**What happens:**
-- Entry (market) ≈ 75,000. SL distance = 1,000. `rr = 2.5` → TP = 75,000 + 2,500 = **77,500**
-- CTC fires at 75,000 + 0.4 × 2,500 = **76,000** → SL moves to break-even (~75,003)
-- If 10 × 3-min candles (30 min) pass since `entryTime` → force-close
-- If TP 77,500 is hit first → 100% close ✅
+Entry ≈ 75,000 | SL = 74,000 | TP = 75,000 + 1,000 × 2.5 = **77,500**
 
 ---
 
-### SELL (short), no CTC, no holding
+### Mode B — Pips SL + R:R (new style)
 
 ```json
 {
-  "symbol":         "ETHUSDT",
-  "direction":      "SELL",
-  "stopLoss":       3200,
-  "rr":             2.0,
-  "leverage":       5,
-  "riskMode":       "isolated",
-  "marginDollar":   50
+  "symbol":       "BTCUSDT",
+  "direction":    "BUY",
+  "leverage":     10,
+  "riskMode":     "isolated",
+  "marginDollar": 100,
+  "slPips":       150,
+  "rr":           2.67,
+  "ctcEnabled":   true,
+  "ctcTrigger":   0.4,
+  "holdingCandles": 10,
+  "entryTime":    1714521600000
 }
 ```
 
-**What happens:**
-- Entry ≈ 3,000. SL distance = 200. `rr = 2.0` → TP = 3,000 - 400 = **2,600**
-- No CTC, no holding — pure SL/TP trade.
+Fill ≈ 75,660 | SL = 75,660 − 150 = **75,510** | TP = 75,660 + 150×2.67 = **76,060.5**
+
+---
+
+### Mode B — Pips SL + Pips TP (fully pips-based)
+
+```json
+{
+  "symbol":       "ETHUSDT",
+  "direction":    "SELL",
+  "leverage":     5,
+  "riskMode":     "isolated",
+  "marginDollar": 50,
+  "slPips":       80,
+  "tpPips":       200
+}
+```
+
+Fill ≈ 3,000 | SL = 3,000 + 80 = **3,080** | TP = 3,000 − 200 = **2,800**
 
 ---
 
@@ -108,16 +153,19 @@ Default port is **3000** (configurable via `DASHBOARD_PORT` in `.env`).
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `symbol` | string | ✅ | Binance Futures pair, e.g. `BTCUSDT` |
-| `direction` | string | ✅ | `"BUY"` (long) or `"SELL"` (short) |
-| `stopLoss` | number | ✅ | Stop loss price |
-| `rr` | number | ✅ | Risk:reward ratio. e.g. `2.5` = TP is 2.5× the SL distance away |
+| `direction` | string | ✅ | `"BUY"` or `"SELL"` |
 | `leverage` | number | ✅ | 1 to 125 |
 | `riskMode` | string | ✅ | `"isolated"` or `"crossed"` |
-| `marginDollar` | number | ✅ | Fixed dollar margin per trade, e.g. `100` |
-| `ctcEnabled` | boolean | ❌ | Enable CTC (move SL to BE before TP is hit). Default: `false` |
-| `ctcTrigger` | number | ❌ | Fraction of TP distance to fire CTC. `0.4` = 40%. Default: `0.5` |
-| `holdingCandles` | number | ❌ | Max 3-min candles before force-close. `0` = no limit. Default: `0` |
-| `entryTime` | number (ms) | ❌ | Unix ms timestamp of signal entry (start of holding countdown) |
+| `marginDollar` | number | ✅ | Fixed dollar margin e.g. `100` |
+| `stopLoss` | number | ✅* | Absolute SL price (*one of stopLoss/slPips required) |
+| `slPips` | number | ✅* | SL distance in USDT from fill price (*one of stopLoss/slPips required) |
+| `rr` | number | ✅** | Risk:reward ratio (**required unless tpPips or takeProfit1 provided) |
+| `tpPips` | number | ❌ | TP distance in USDT from fill price (overrides rr) |
+| `takeProfit1` | number | ❌ | Explicit TP price (overrides rr and tpPips) |
+| `ctcEnabled` | boolean | ❌ | Enable CTC. Default: `false` |
+| `ctcTrigger` | number | ❌ | CTC fires at this fraction of TP dist. Default: `0.5` |
+| `holdingCandles` | number | ❌ | Force-close after N × 3-min candles. Default: `0` (off) |
+| `entryTime` | number | ❌ | Unix ms of signal entry (holding countdown start) |
 | `orderType` | string | ❌ | `"MARKET"` (default) or `"LIMIT"` |
 
 ---
@@ -128,16 +176,17 @@ Default port is **3000** (configurable via `DASHBOARD_PORT` in `.env`).
 {
   "success": true,
   "data": {
-    "tradeId":        "daf8579a-e930-4bf8-b95c-bef438442239",
+    "tradeId":        "daf8579a-...",
     "orderId":        13050663972,
     "symbol":         "BTCUSDT",
     "side":           "LONG",
-    "orderType":      "MARKET",
     "quantity":       0.0132,
-    "price":          75000,
-    "stopLoss":       74000,
-    "takeProfit1":    77500,
-    "rr":             2.5,
+    "price":          75660,
+    "stopLoss":       75510,
+    "takeProfit1":    76060.5,
+    "rr":             2.67,
+    "slPips":         150,
+    "tpPips":         null,
     "ctcEnabled":     true,
     "ctcTrigger":     0.4,
     "holdingCandles": 10,
@@ -154,7 +203,7 @@ Default port is **3000** (configurable via `DASHBOARD_PORT` in `.env`).
 ```json
 {
   "success": false,
-  "error": "Missing required field: rr (risk:reward ratio, e.g. 2.5)"
+  "error": "Missing required field: stopLoss (price) OR slPips (distance in USDT from entry)"
 }
 ```
 
@@ -162,65 +211,42 @@ Default port is **3000** (configurable via `DASHBOARD_PORT` in `.env`).
 
 ## CTC — Close to Cost
 
-CTC = move Stop Loss to break-even **before** TP is hit (protecting your entry).
+Moves SL to break-even before TP is hit (does **not** close the trade).
 
-- Does **not** close the trade — it just moves the SL to entry price (+ small fee buffer)
-- Example: Entry 75,000 | TP 77,500 | `ctcTrigger: 0.4`
-  - CTC fires when price reaches: 75,000 + 0.4 × 2,500 = **76,000**
-  - SL is moved to ≈75,030 (entry + 0.04% fee buffer)
-  - Trade continues running toward TP at 77,500
+```
+ctcTrigger: 0.4 → CTC fires when price reaches 40% of the way from entry to TP
+```
+
+Example: entry 75,660 | TP 76,060.5 | `ctcTrigger: 0.4`
+- CTC price = 75,660 + 0.4 × 400.5 = **75,820.2**
+- At 75,820 → SL moves to ≈75,690 (entry + ~0.04% fee buffer)
+- Trade continues toward TP 76,060.5
 
 ---
 
 ## Holding Candles
 
-- `holdingCandles: 10` = force-close after **10 × 3-minute candles = 30 minutes** from `entryTime`
-- Counted from `entryTime` (unix ms). If `entryTime` not sent, countdown starts from when the bot placed the order
-- Each position has a **holding toggle** in the dashboard Active Positions table:
-  - Toggle **OFF** → bot ignores the candle limit, trade runs until SL/TP
-  - Toggle **ON** → bot resumes watching. If limit is already past → closes **immediately**
+- `holdingCandles: 10` = force-close after **10 × 3 min = 30 min** from `entryTime`
+- Dashboard Active Positions table has a per-position **holding toggle**:
+  - Toggle **OFF** → candle limit paused, trade runs to SL/TP normally
+  - Toggle **ON**  → if limit already passed → closes **immediately**
 
 ---
 
-## TP Computation
+## Server Setup (EC2)
 
-```
-BUY:  TP = entryPrice + abs(entryPrice - stopLoss) × rr
-SELL: TP = entryPrice - abs(entryPrice - stopLoss) × rr
-```
+See `DEPLOY.md` for full EC2 + PM2 + AWS Security Group steps.
 
-Example: entry=75,000 | SL=74,000 | rr=2.5
-```
-TP = 75,000 + 1,000 × 2.5 = 77,500
-```
-
----
-
-## Server Setup
-
+Quick start:
 ```bash
-cd SignalBasedTradingBot
-node dashboard/server.js
+cd ~/SignalBasedTradingBot
+npm install
+cp .env.example .env  # fill in API_KEY, API_SECRET, DASHBOARD_PASSWORD
+pm2 start dashboard/server.js --name trading-bot --cwd ~/SignalBasedTradingBot
+pm2 save && pm2 startup
 ```
 
-API available at `http://<your-ip>:3000`.
-
-### Expose to the internet (for webhook)
-
-```bash
-# Quick test with ngrok
-ngrok http 3000
-# Provider sends to: https://xxxx.ngrok.io/api/trade
-
-# Production: use a VPS with your public IP
+Webhook URL for signal provider:
 ```
-
----
-
-## Security (Recommended)
-
-Add `WEBHOOK_SECRET=mysecret` to `.env` and send it in every request:
-
-```
-X-Webhook-Secret: mysecret
+POST http://<your-ec2-ip>:3000/api/trade
 ```
