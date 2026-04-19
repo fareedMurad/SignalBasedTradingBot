@@ -6,13 +6,190 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Signal Trading Bot - Dashboard</title>
     <link rel="stylesheet" href="style.css">
+    <style>
+        /* ─── Tabs ─────────────────────────────────── */
+        .tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 0;
+            border-bottom: 2px solid #e0e0e0;
+            padding: 0 20px;
+            background: #fff;
+        }
+        .tab-btn {
+            padding: 12px 22px;
+            border: none;
+            background: transparent;
+            cursor: pointer;
+            font-size: 0.95em;
+            font-weight: 600;
+            color: #666;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -2px;
+            transition: all 0.2s;
+            border-radius: 6px 6px 0 0;
+        }
+        .tab-btn:hover { color: #667eea; background: #f5f5ff; }
+        .tab-btn.active { color: #667eea; border-bottom-color: #667eea; background: #f5f5ff; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        /* ─── Toggle Switch ─────────────────────────── */
+        .switch {
+            position: relative;
+            display: inline-block;
+            width: 46px;
+            height: 24px;
+            vertical-align: middle;
+        }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-color: #ccc;
+            transition: .3s;
+            border-radius: 24px;
+        }
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px; width: 18px;
+            left: 3px; bottom: 3px;
+            background-color: white;
+            transition: .3s;
+            border-radius: 50%;
+        }
+        input:checked + .slider { background-color: #4caf50; }
+        input:checked + .slider:before { transform: translateX(22px); }
+        .switch-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.95em;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .switch-label span { color: #555; }
+
+        /* ─── Global Holding Banner ──────────────────── */
+        .holding-global-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: linear-gradient(90deg, #1a1a2e 0%, #16213e 100%);
+            color: #fff;
+            padding: 12px 22px;
+            border-radius: 10px;
+            margin-bottom: 18px;
+        }
+        .holding-global-bar .left { display: flex; align-items: center; gap: 12px; }
+        .holding-global-bar .label { font-size: 1em; font-weight: 700; }
+        .holding-global-bar .desc { font-size: 0.82em; color: #aaa; margin-top: 2px; }
+        .holding-status-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.82em;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+        }
+        .holding-status-badge.on  { background: #4caf50; color: #fff; }
+        .holding-status-badge.off { background: #e53935; color: #fff; }
+
+        /* ─── Margin Mode Toggle ─────────────────────── */
+        .margin-mode-toggle {
+            display: flex;
+            gap: 0;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .margin-mode-btn {
+            flex: 1;
+            padding: 8px 14px;
+            border: none;
+            background: #f5f5f5;
+            cursor: pointer;
+            font-size: 0.9em;
+            font-weight: 600;
+            color: #666;
+            transition: all 0.2s;
+        }
+        .margin-mode-btn.active { background: #667eea; color: #fff; }
+
+        /* ─── Position Table Holding Cell ───────────── */
+        .holding-cell { text-align: center; min-width: 120px; }
+        .candle-progress {
+            font-size: 0.78em;
+            color: #888;
+            margin-top: 3px;
+        }
+        .candle-progress.near-limit { color: #e67e22; font-weight: 700; }
+        .candle-progress.at-limit   { color: #e53935; font-weight: 700; }
+
+        /* ─── CTC badge ──────────────────────────────── */
+        .ctc-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 0.75em;
+            font-weight: 700;
+        }
+        .ctc-badge.active     { background: #e8f5e9; color: #2e7d32; }
+        .ctc-badge.triggered  { background: #fff3e0; color: #e65100; }
+        .ctc-badge.off        { background: #f5f5f5; color: #aaa; }
+
+        /* ─── RR Computed TPs ────────────────────────── */
+        .computed-tps {
+            display: none;
+            background: #f0f8ff;
+            border: 1px dashed #90caf9;
+            border-radius: 8px;
+            padding: 10px 14px;
+            margin-top: 8px;
+            font-size: 0.88em;
+            color: #1565c0;
+        }
+        .computed-tps.show { display: block; }
+        .tp-row { display: flex; justify-content: space-between; margin-bottom: 4px; }
+
+        /* ─── Form section dividers ──────────────────── */
+        .form-section-title {
+            font-size: 0.8em;
+            font-weight: 700;
+            color: #667eea;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            padding: 12px 0 6px;
+            border-top: 1px solid #eee;
+            margin-top: 8px;
+        }
+        .form-section-title:first-child { border-top: none; padding-top: 0; }
+
+        /* ─── Position Monitor Status ────────────────── */
+        .monitor-status {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 12px;
+            margin-bottom: 18px;
+        }
+        .monitor-stat {
+            background: #fafafa;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            padding: 12px 16px;
+            text-align: center;
+        }
+        .monitor-stat .title { font-size: 0.78em; color: #888; margin-bottom: 4px; }
+        .monitor-stat .value { font-size: 1.4em; font-weight: 700; color: #333; }
+    </style>
 </head>
 
 <body>
     <div class="container">
         <!-- Header -->
         <header class="header">
-            <h1>🎯 Signal Trading Bot Dashboard</h1>
+            <h1>🎯 Signal Trading Bot</h1>
             <div class="header-stats">
                 <div class="stat-card">
                     <span class="stat-label">Balance</span>
@@ -33,23 +210,36 @@
             </div>
         </header>
 
-        <!-- Trade Signal Form -->
-        <div class="section">
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab-btn active" data-tab="trade">📨 Trade Signal</button>
+            <button class="tab-btn" data-tab="positions">📊 Active Positions</button>
+            <button class="tab-btn" data-tab="history">📋 History</button>
+            <button class="tab-btn" data-tab="statistics">📈 Statistics</button>
+        </div>
+
+        <!-- ═══════════════════════════════════════════
+             TAB 1: TRADE SIGNAL FORM
+        ════════════════════════════════════════════ -->
+        <div id="tab-trade" class="tab-content active section">
             <h2>📨 Submit Trade Signal</h2>
+
             <form id="tradeForm" class="trade-form">
+
+                <!-- Section: Entry -->
+                <div class="form-section-title">📍 Entry Setup</div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label for="symbol">Symbol <span id="symbolPrice" style="color: #667eea; font-weight: 600;"></span></label>
-                        <input type="text" id="symbol" list="symbolList" placeholder="Search symbol (e.g., BTC, ETH, SOL...)" required autocomplete="off">
-                        <datalist id="symbolList">
-                        </datalist>
-                        <small style="color: #888;">Type to search from 400+ coins</small>
+                        <label for="symbol">Symbol <span id="symbolPrice" style="color:#667eea;font-weight:600;"></span></label>
+                        <input type="text" id="symbol" list="symbolList" placeholder="e.g. BTCUSDT, ETHUSDT…" required autocomplete="off">
+                        <datalist id="symbolList"></datalist>
+                        <small style="color:#888;">Type to search all pairs</small>
                     </div>
                     <div class="form-group">
-                        <label for="side">Side</label>
-                        <select id="side" required>
-                            <option value="LONG">LONG</option>
-                            <option value="SHORT">SHORT</option>
+                        <label for="direction">Direction</label>
+                        <select id="direction" required>
+                            <option value="BUY">BUY (Long)</option>
+                            <option value="SELL">SELL (Short)</option>
                         </select>
                     </div>
                     <div class="form-group">
@@ -59,22 +249,36 @@
                             <option value="LIMIT">Limit</option>
                         </select>
                     </div>
-                    <div class="form-group" id="limitPriceGroup" style="display: none;">
+                    <div class="form-group" id="limitPriceGroup" style="display:none;">
                         <label for="limitPrice">Limit Price</label>
                         <input type="number" id="limitPrice" step="0.00000001" placeholder="0.00">
                     </div>
                 </div>
 
+                <!-- Section: Margin -->
+                <div class="form-section-title">💰 Margin & Leverage</div>
                 <div class="form-row">
                     <div class="form-group">
-                        <label for="walletPercentage">Wallet % (1-100)</label>
-                        <input type="number" id="walletPercentage" min="1" max="100" value="10" required>
+                        <label>Margin Mode</label>
+                        <div class="margin-mode-toggle">
+                            <button type="button" class="margin-mode-btn active" id="btnPercent" onclick="setMarginMode('percent')">% Wallet</button>
+                            <button type="button" class="margin-mode-btn" id="btnDollar" onclick="setMarginMode('dollar')">$ Amount</button>
+                        </div>
+                        <input type="hidden" id="marginMode" value="percent">
+                    </div>
+                    <div class="form-group" id="walletPctGroup">
+                        <label for="walletPercentage">Wallet % (1–100)</label>
+                        <input type="number" id="walletPercentage" min="1" max="100" value="10">
+                    </div>
+                    <div class="form-group" id="marginDollarGroup" style="display:none;">
+                        <label for="marginDollar">Margin $ per Trade</label>
+                        <input type="number" id="marginDollar" min="1" step="1" placeholder="e.g. 100">
+                        <small style="color:#888;">Signal provider's $ margin</small>
                     </div>
                     <div class="form-group">
-                        <label for="leverage">Leverage (1-125)</label>
+                        <label for="leverage">Leverage (1–125)</label>
                         <input type="number" id="leverage" min="1" max="125" value="10" required>
-                        <small id="leverageInfo" style="color: #667eea; font-weight: 600;">Select a symbol to see max
-                            leverage</small>
+                        <small id="leverageInfo" style="color:#667eea;font-weight:600;">Select a symbol to see max leverage</small>
                     </div>
                     <div class="form-group">
                         <label for="riskMode">Risk Mode</label>
@@ -83,83 +287,146 @@
                             <option value="crossed">Crossed</option>
                         </select>
                     </div>
+                </div>
+
+                <!-- Section: Risk -->
+                <div class="form-section-title">🎯 Risk / Reward</div>
+                <div class="form-row">
                     <div class="form-group">
                         <label for="stopLoss">Stop Loss Price</label>
-                        <input type="number" id="stopLoss" step="0.00000001" required>
+                        <input type="number" id="stopLoss" step="0.00000001" placeholder="0.00" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="rrRatioInput">R:R Ratio <span style="color:#888;font-weight:400;">(e.g. 2.5)</span></label>
+                        <input type="number" id="rrRatioInput" step="0.01" min="0.1" placeholder="e.g. 2.5">
+                        <small style="color:#888;">TPs auto-computed at 33% / 67% / 100% of target</small>
                     </div>
                 </div>
 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="takeProfit1">Take Profit 1 (33%)</label>
-                        <input type="number" id="takeProfit1" step="0.00000001" required>
+                <!-- Computed TPs display -->
+                <div class="computed-tps" id="computedTPs">
+                    <strong>📐 Auto-Computed TPs:</strong>
+                    <div class="tp-row">
+                        <span>TP1 (33%)</span><span id="computedTP1">—</span>
                     </div>
-                    <div class="form-group">
-                        <label for="takeProfit2">Take Profit 2 (33%)</label>
-                        <input type="number" id="takeProfit2" step="0.00000001" required>
+                    <div class="tp-row">
+                        <span>TP2 (67%)</span><span id="computedTP2">—</span>
                     </div>
-                    <div class="form-group">
-                        <label for="takeProfit3">Take Profit 3 (34%)</label>
-                        <input type="number" id="takeProfit3" step="0.00000001" required>
+                    <div class="tp-row">
+                        <span>TP3 (100%)</span><span id="computedTP3">—</span>
                     </div>
                 </div>
 
-                <div class="form-row">
-                    <div class="form-group">
-                        <label for="ctcLevel">CTC (Close to Cost)</label>
-                        <select id="ctcLevel" required>
-                            <option value="NONE">Disabled</option>
-                            <option value="TP1">After TP1</option>
-                            <option value="TP2">After TP2</option>
-                        </select>
-                        <small>Move SL to break-even after selected TP hits</small>
-                    </div>
-                    <div class="form-group">
-                        <label>&nbsp;</label>
-                        <div style="padding: 12px; background: #f0f0f0; border-radius: 8px; font-size: 0.9em;">
-                            <strong>💡 Tip:</strong> Leverage and Risk Mode are set per trade
+                <!-- Manual TP override -->
+                <details style="margin-top:10px;">
+                    <summary style="cursor:pointer;color:#667eea;font-weight:600;font-size:0.9em;">⚙️ Override TPs manually (optional)</summary>
+                    <div class="form-row" style="margin-top:10px;">
+                        <div class="form-group">
+                            <label for="takeProfit1">TP1 Price (33%)</label>
+                            <input type="number" id="takeProfit1" step="0.00000001" placeholder="Auto from R:R">
+                        </div>
+                        <div class="form-group">
+                            <label for="takeProfit2">TP2 Price (33%)</label>
+                            <input type="number" id="takeProfit2" step="0.00000001" placeholder="Auto from R:R">
+                        </div>
+                        <div class="form-group">
+                            <label for="takeProfit3">TP3 Price (34%)</label>
+                            <input type="number" id="takeProfit3" step="0.00000001" placeholder="Auto from R:R">
                         </div>
                     </div>
+                </details>
+
+                <!-- Section: Holding -->
+                <div class="form-section-title">⏱️ Holding Candles</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="holdingCandles">Holding Candles <span style="color:#888;font-weight:400;">(3-min candles)</span></label>
+                        <input type="number" id="holdingCandles" min="0" value="0" placeholder="0 = no limit">
+                        <small style="color:#888;">Auto-close after N × 3min candles (0 = disabled)</small>
+                    </div>
+                    <div class="form-group">
+                        <label for="entryTime">Entry Time <span style="color:#888;font-weight:400;">(unix ms, optional)</span></label>
+                        <input type="number" id="entryTime" placeholder="Auto = now">
+                        <small style="color:#888;">From signal provider — or leave blank to use current time</small>
+                    </div>
                 </div>
 
-                <button type="submit" class="btn btn-primary">Execute Trade</button>
-                
-                <!-- Risk/Reward Calculator -->
-                <div id="riskRewardDisplay" style="display: none; margin-top: 20px; padding: 20px; background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%); border-radius: 10px;">
-                    <h3 style="margin-bottom: 15px; color: #333;">📊 Trade Analysis</h3>
-                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                <!-- Section: CTC -->
+                <div class="form-section-title">🔄 CTC (Close to Cost)</div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>CTC Enabled</label>
+                        <label class="switch-label">
+                            <label class="switch">
+                                <input type="checkbox" id="ctcEnabled" onchange="toggleCTCTrigger()">
+                                <span class="slider"></span>
+                            </label>
+                            <span id="ctcEnabledLabel">Disabled</span>
+                        </label>
+                        <small style="color:#888;">Move SL to break-even when trigger price hit</small>
+                    </div>
+                    <div class="form-group" id="ctcTriggerGroup" style="display:none;">
+                        <label for="ctcTrigger">CTC Trigger % of TP</label>
+                        <input type="number" id="ctcTrigger" min="1" max="99" value="40" step="1" placeholder="40">
+                        <small style="color:#888;">e.g. 40 = move SL when price reaches 40% of TP distance</small>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary" style="margin-top:16px;">🚀 Execute Trade</button>
+
+                <!-- Trade Analysis Preview -->
+                <div id="riskRewardDisplay" style="display:none;margin-top:20px;padding:20px;background:linear-gradient(135deg,#f5f7fa 0%,#c3cfe2 100%);border-radius:10px;">
+                    <h3 style="margin-bottom:15px;color:#333;">📊 Trade Preview</h3>
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:15px;">
                         <div>
-                            <div style="font-size: 0.9em; color: #666; margin-bottom: 5px;">Position Size</div>
-                            <div id="rrPositionSize" style="font-size: 1.3em; font-weight: 700; color: #333;">-</div>
+                            <div style="font-size:0.9em;color:#666;margin-bottom:5px;">Position Size</div>
+                            <div id="rrPositionSize" style="font-size:1.3em;font-weight:700;color:#333;">-</div>
                         </div>
-                        <div style="background: #fee; padding: 10px; border-radius: 8px; border-left: 4px solid #e74c3c;">
-                            <div style="font-size: 0.9em; color: #666; margin-bottom: 5px;">🔻 Risk (SL)</div>
-                            <div id="rrRisk" style="font-size: 1.3em; font-weight: 700; color: #e74c3c;">-</div>
+                        <div style="background:#fee;padding:10px;border-radius:8px;border-left:4px solid #e74c3c;">
+                            <div style="font-size:0.9em;color:#666;margin-bottom:5px;">🔻 Risk (SL)</div>
+                            <div id="rrRisk" style="font-size:1.3em;font-weight:700;color:#e74c3c;">-</div>
                         </div>
-                        <div style="background: #efe; padding: 10px; border-radius: 8px; border-left: 4px solid #27ae60;">
-                            <div style="font-size: 0.9em; color: #666; margin-bottom: 5px;">🎯 TP1 Profit</div>
-                            <div id="rrTP1" style="font-size: 1.3em; font-weight: 700; color: #27ae60;">-</div>
+                        <div style="background:#efe;padding:10px;border-radius:8px;border-left:4px solid #27ae60;">
+                            <div style="font-size:0.9em;color:#666;margin-bottom:5px;">🎯 TP1 Profit</div>
+                            <div id="rrTP1" style="font-size:1.3em;font-weight:700;color:#27ae60;">-</div>
                         </div>
-                        <div style="background: #efe; padding: 10px; border-radius: 8px; border-left: 4px solid #27ae60;">
-                            <div style="font-size: 0.9em; color: #666; margin-bottom: 5px;">🎯 TP2 Profit</div>
-                            <div id="rrTP2" style="font-size: 1.3em; font-weight: 700; color: #27ae60;">-</div>
+                        <div style="background:#efe;padding:10px;border-radius:8px;border-left:4px solid #27ae60;">
+                            <div style="font-size:0.9em;color:#666;margin-bottom:5px;">🎯 TP2 Profit</div>
+                            <div id="rrTP2" style="font-size:1.3em;font-weight:700;color:#27ae60;">-</div>
                         </div>
-                        <div style="background: #efe; padding: 10px; border-radius: 8px; border-left: 4px solid #27ae60;">
-                            <div style="font-size: 0.9em; color: #666; margin-bottom: 5px;">🎯 TP3 Profit</div>
-                            <div id="rrTP3" style="font-size: 1.3em; font-weight: 700; color: #27ae60;">-</div>
+                        <div style="background:#efe;padding:10px;border-radius:8px;border-left:4px solid #27ae60;">
+                            <div style="font-size:0.9em;color:#666;margin-bottom:5px;">🎯 TP3 Profit</div>
+                            <div id="rrTP3" style="font-size:1.3em;font-weight:700;color:#27ae60;">-</div>
                         </div>
-                        <div style="background: #e3f2fd; padding: 10px; border-radius: 8px; border-left: 4px solid #2196f3;">
-                            <div style="font-size: 0.9em; color: #666; margin-bottom: 5px;">⚖️ Risk/Reward</div>
-                            <div id="rrRatio" style="font-size: 1.3em; font-weight: 700; color: #2196f3;">-</div>
+                        <div style="background:#e3f2fd;padding:10px;border-radius:8px;border-left:4px solid #2196f3;">
+                            <div style="font-size:0.9em;color:#666;margin-bottom:5px;">⚖️ Risk/Reward</div>
+                            <div id="rrRatio" style="font-size:1.3em;font-weight:700;color:#2196f3;">-</div>
                         </div>
                     </div>
                 </div>
+
             </form>
         </div>
 
-        <!-- Active Positions -->
-        <div class="section">
+        <!-- ═══════════════════════════════════════════
+             TAB 2: ACTIVE POSITIONS
+        ════════════════════════════════════════════ -->
+        <div id="tab-positions" class="tab-content section">
             <h2>📊 Active Positions</h2>
+
+            <!-- Monitor quick stats -->
+            <div class="monitor-status" id="monitorStats">
+                <div class="monitor-stat">
+                    <div class="title">Monitored</div>
+                    <div class="value" id="statMonitored">0</div>
+                </div>
+                <div class="monitor-stat">
+                    <div class="title">Pending Orders</div>
+                    <div class="value" id="statPending">0</div>
+                </div>
+            </div>
+
+            <!-- Positions Table -->
             <div class="table-container">
                 <table id="positionsTable">
                     <thead>
@@ -173,20 +440,24 @@
                             <th>PnL</th>
                             <th>R:R</th>
                             <th>Lev</th>
+                            <th>Holding ⏱</th>
+                            <th>CTC 🔄</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="positionsBody">
                         <tr>
-                            <td colspan="10" class="loading">No active positions</td>
+                            <td colspan="12" class="loading">No active positions</td>
                         </tr>
                     </tbody>
                 </table>
             </div>
         </div>
 
-        <!-- Trade History -->
-        <div class="section">
+        <!-- ═══════════════════════════════════════════
+             TAB 3: TRADE HISTORY
+        ════════════════════════════════════════════ -->
+        <div id="tab-history" class="tab-content section">
             <h2>📋 Trade History</h2>
             <div class="table-container">
                 <table id="tradesTable">
@@ -197,24 +468,27 @@
                             <th>Side</th>
                             <th>Type</th>
                             <th>Entry</th>
-                            <th>Quantity</th>
+                            <th>Qty</th>
                             <th>R:R</th>
+                            <th>Holding</th>
                             <th>PnL</th>
                             <th>Status</th>
-                            <th>CTC</th>
+                            <th>Close Reason</th>
                         </tr>
                     </thead>
                     <tbody id="tradesBody">
                         <tr>
-                            <td colspan="10" class="loading">Loading trades...</td>
+                            <td colspan="11" class="loading">Loading trades…</td>
                         </tr>
                     </tbody>
                 </table>
             </div>
         </div>
 
-        <!-- Statistics -->
-        <div class="section">
+        <!-- ═══════════════════════════════════════════
+             TAB 4: STATISTICS
+        ════════════════════════════════════════════ -->
+        <div id="tab-statistics" class="tab-content section">
             <h2>📈 Performance Statistics</h2>
             <div class="stats-grid">
                 <div class="stat-box">
@@ -243,7 +517,8 @@
                 </div>
             </div>
         </div>
-    </div>
+
+    </div><!-- /container -->
 
     <script src="app.js"></script>
 </body>

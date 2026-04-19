@@ -1,6 +1,10 @@
 /**
  * Binance Client Module
  * Handles all Binance API interactions
+ *
+ * TRADE_MODE env controls which environment is used:
+ *   testnet  → testnet.binancefuture.com  (conditional orders NOT supported, software SL/TP used)
+ *   live     → fapi.binance.com            (full API support, real money)
  */
 
 const Binance = require('binance-api-node').default;
@@ -10,6 +14,7 @@ class BinanceClient {
         this.config = config;
         this.logger = logger;
         this.client = null;
+        this.tradeMode = null;
         this.initialize();
     }
 
@@ -19,20 +24,34 @@ class BinanceClient {
             apiSecret: this.config.apiSecret
         };
 
-        // Set testnet/demo URLs if enabled
-        if (this.config.useTestnet) {
-            // Binance Futures Testnet URLs
-            apiConfig.httpBase = 'https://testnet.binancefuture.com';
-            apiConfig.httpFutures = 'https://testnet.binancefuture.com';
-            apiConfig.wsBase = 'wss://stream.binancefuture.com';
-            apiConfig.wsFutures = 'wss://stream.binancefuture.com';
-            this.logger.info('🧪 Using Binance Futures Testnet');
-        } else {
-            this.logger.info('💰 Using Binance LIVE Environment');
+        this.tradeMode = this.config.tradeMode || 'live';
+
+        switch (this.tradeMode) {
+            case 'testnet':
+                apiConfig.httpBase    = 'https://testnet.binancefuture.com';
+                apiConfig.httpFutures = 'https://testnet.binancefuture.com';
+                apiConfig.wsBase      = 'wss://stream.binancefuture.com';
+                apiConfig.wsFutures   = 'wss://stream.binancefuture.com';
+                this.logger.info('🧪 Mode: TESTNET (testnet.binancefuture.com)');
+                this.logger.info('⚠️  Conditional orders (STOP_MARKET/TP_MARKET) blocked on testnet');
+                this.logger.info('✅ Software SL/TP will be used for position protection');
+                break;
+
+            case 'live':
+            default:
+                // binance-api-node defaults to fapi.binance.com — no override needed
+                this.tradeMode = 'live';
+                this.logger.info('💰 Mode: LIVE (fapi.binance.com) — REAL MONEY TRADING!');
+                break;
         }
 
         this.client = Binance(apiConfig);
-        this.logger.info('✅ Binance client initialized');
+        this.logger.info(`✅ Binance client initialized [${this.tradeMode.toUpperCase()}]`);
+    }
+
+    /** Returns true when running on testnet */
+    isTestnet() {
+        return this.tradeMode === 'testnet';
     }
 
     /**

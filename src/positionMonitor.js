@@ -1,121 +1,221 @@
 /**
  * Position Monitor Module
- * Monitors positions and handles CTC (Close to Cost) functionality
+ * Monitors positions with:
+ *  - Software SL/TP  (testnet mode — exchange conditional orders blocked)
+ *      • Checks mark price vs SL/TP levels every 5 s
+ *      • Single TP exit: closes 100% of position when TP is hit
+ *      • Single SL exit: closes 100% of position when SL is hit
+ *      • CTC: when price reaches ctcTrigger% of TP distance → move SL to break-even (trade continues)
+ *  - Exchange SL/TP  (live mode — exchange-native STOP_MARKET / TAKE_PROFIT_MARKET)
+ *      • Safety watcher verifies every 30 s that exchange SL order exists
+ *  - Holding candle limit (3-min candles, auto-close when limit reached)
+ *  - Per-position holding enable/disable toggle
  */
+
+const CANDLE_INTERVAL_MS = 3 * 60 * 1000; // 3-minute candles
 
 class PositionMonitor {
     constructor(binanceClient, tradeExecutor, logger, storageManager) {
-        this.client = binanceClient;
-        this.executor = tradeExecutor;
-        this.logger = logger;
-        this.storage = storageManager;
-        this.monitoredPositions = new Map(); // symbol -> { side, entryPrice, ctcLevel, ctcTriggered }
-        this.pendingLimitOrders = new Map(); // symbol -> order details
+        this.client     = binanceClient;
+        this.executor   = tradeExecutor;
+        this.logger     = logger;
+        this.storage    = storageManager;
+
+        // symbol → position data object
+        this.monitoredPositions  = new Map();
+        // symbol → pending limit order details
+        this.pendingLimitOrders  = new Map();
     }
 
-    /**
-     * Start monitoring positions
-     */
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Lifecycle
+    // ─────────────────────────────────────────────────────────────────────────
+
     async start() {
         this.logger.info('🔍 Position monitor started');
 
-        // Monitor every 5 seconds
+        // Main position check every 5 s
         this.monitorInterval = setInterval(async () => {
             await this.checkPositions();
         }, 5000);
 
-        // Check for filled limit orders every 10 seconds
+        // Check for filled limit orders every 10 s
         this.limitOrderInterval = setInterval(async () => {
             await this.checkLimitOrders();
         }, 10000);
 
-        // OPTION 3: Safety monitor - check for unprotected positions every 30 seconds
+        // Safety: check for unprotected positions every 30 s (live mode only)
         this.safetyMonitorInterval = setInterval(async () => {
             await this.safetyCheckUnprotectedPositions();
         }, 30000);
-        
-        this.logger.info('🛡️ Safety monitor enabled - checking for unprotected positions every 30s');
+
+        const isTestnet = this.client.isTestnet();
+        this.logger.info(`🛡️ Safety monitor enabled (${isTestnet ? 'software SL/TP — no exchange SL check' : 'live — checking exchange SL orders'})`);
     }
 
-    /**
-     * Stop monitoring
-     */
     stop() {
-        if (this.monitorInterval) {
-            clearInterval(this.monitorInterval);
-        }
-        if (this.limitOrderInterval) {
-            clearInterval(this.limitOrderInterval);
-        }
-        if (this.safetyMonitorInterval) {
-            clearInterval(this.safetyMonitorInterval);
-        }
+        if (this.monitorInterval)       clearInterval(this.monitorInterval);
+        if (this.limitOrderInterval)    clearInterval(this.limitOrderInterval);
+        if (this.safetyMonitorInterval) clearInterval(this.safetyMonitorInterval);
         this.logger.info('🛑 Position monitor stopped');
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Add / Remove positions
+    // ─────────────────────────────────────────────────────────────────────────
+
     /**
-     * Add position to monitor
+     * Add a position to monitoring.
+     *
+     * Signal provider model (single TP):
+     *   side, entryPrice, orderType, ctcEnabled, ctcTrigger, holdingCandles, tradeStartTime
+     *   softwareSLTP  - boolean
+     *   stopLoss      - SL price (100% close on hit)
+     *   takeProfit1   - single TP price (100% close on hit)
+     *
+     * CTC: when price reaches ctcTrigger% of entry→TP distance → move in-memory SL to break-even (does NOT close)
      */
-    addPosition(symbol, side, entryPrice, ctcLevel, orderType = 'MARKET') {
+    addPosition(symbol, options) {
+        const {
+            side,
+            entryPrice,
+            orderType      = 'MARKET',
+            ctcEnabled     = false,
+            ctcTrigger     = 0.5,
+            holdingCandles = 0,
+            tradeStartTime = Date.now(),
+            // software SL/TP
+            softwareSLTP   = false,
+            stopLoss       = null,
+            takeProfit1    = null
+        } = options;
+
+        const holdingEnabled = holdingCandles > 0;
+        const isLong = side === 'LONG';
+
+        // Pre-compute CTC trigger price (ctcTrigger% of entry→TP distance)
+        let ctcTriggerPrice = null;
+        if (ctcEnabled && takeProfit1 && entryPrice) {
+            ctcTriggerPrice = isLong
+                ? entryPrice + ctcTrigger * (takeProfit1 - entryPrice)
+                : entryPrice - ctcTrigger * (entryPrice - takeProfit1);
+            this.logger.info(
+                `📐 CTC trigger for ${symbol}: ${ctcTriggerPrice.toFixed(4)} (${(ctcTrigger * 100).toFixed(0)}% of TP dist)`
+            );
+        }
+
         this.monitoredPositions.set(symbol, {
             side,
             entryPrice,
-            ctcLevel,
-            ctcTriggered: false,
             orderType,
-            lastKnownPnL: 0, // Track PnL before position closes
+            // CTC
+            ctcEnabled: !!ctcEnabled,
+            ctcTrigger,
+            ctcTriggerPrice,
+            ctcTriggered: false,
+            // Holding candles
+            holdingCandles,
+            tradeStartTime,
+            holdingEnabled,
+            // Software SL/TP — single TP model (100% exit on SL or TP hit)
+            softwareSLTP: !!softwareSLTP,
+            stopLoss,
+            takeProfit1,
+            tpHit: false,
+            // Misc
+            lastKnownPnL: 0,
             lastUpdated: Date.now()
         });
-        this.logger.info(`📌 Monitoring ${symbol} ${side} position (CTC: ${ctcLevel})`);
+
+        const modeTag = softwareSLTP ? '🧪 software SL/TP' : '🏦 exchange SL/TP';
+        this.logger.info(
+            `📌 Monitoring ${symbol} ${side} [${modeTag}] | ` +
+            `CTC: ${ctcEnabled ? `${(ctcTrigger * 100).toFixed(0)}% of TP` : 'off'} | ` +
+            `Holding: ${holdingCandles > 0 ? `${holdingCandles} candles` : 'off'}`
+        );
+        if (softwareSLTP) {
+            this.logger.info(`🔒 Software SL/TP: SL=${stopLoss} | TP=${takeProfit1}`);
+        }
     }
 
-    /**
-     * Add pending limit order to monitor
-     */
+    removePosition(symbol) {
+        this.monitoredPositions.delete(symbol);
+        this.logger.info(`🗑️ Stopped monitoring ${symbol}`);
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Holding toggle
+    // ─────────────────────────────────────────────────────────────────────────
+
+    async setPositionHolding(symbol, enabled) {
+        const positionData = this.monitoredPositions.get(symbol);
+        if (!positionData) return false;
+
+        const wasDisabled = !positionData.holdingEnabled;
+        positionData.holdingEnabled = !!enabled;
+        this.monitoredPositions.set(symbol, positionData);
+        this.logger.info(`📌 ${symbol} holding: ${enabled ? 'ENABLED' : 'DISABLED'}`);
+
+        // If re-enabled, immediately check if limit already reached
+        if (enabled && wasDisabled && positionData.holdingCandles > 0) {
+            const elapsed = Math.floor((Date.now() - positionData.tradeStartTime) / CANDLE_INTERVAL_MS);
+            if (elapsed >= positionData.holdingCandles) {
+                this.logger.info(
+                    `⏰ ${symbol}: holding re-enabled — already at ${elapsed}/${positionData.holdingCandles} candles → closing now`
+                );
+                await this._closeForHolding(symbol, positionData);
+            }
+        }
+        return true;
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Limit order monitoring
+    // ─────────────────────────────────────────────────────────────────────────
+
     addPendingLimitOrder(symbol, orderDetails) {
         this.pendingLimitOrders.set(symbol, orderDetails);
-        this.logger.info(`📌 Monitoring limit order for ${symbol}`);
+        this.logger.info(`📌 Monitoring pending limit order for ${symbol}`);
     }
 
-    /**
-     * Check limit orders for fills
-     */
     async checkLimitOrders() {
         if (this.pendingLimitOrders.size === 0) return;
+        const isTestnet = this.client.isTestnet();
 
         try {
             for (const [symbol, orderDetails] of this.pendingLimitOrders.entries()) {
                 const positions = await this.client.getPositions(symbol);
-                const position = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
+                const position  = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
 
                 if (position) {
-                    // Limit order filled!
                     this.logger.info(`✅ Limit order filled for ${symbol} at ${position.entryPrice}`);
-
-                    // Set SL/TP now
-                    const symbolInfo = await this.client.getSymbolInfo(symbol);
                     const entryPrice = parseFloat(position.entryPrice);
-                    const quantity = Math.abs(parseFloat(position.positionAmt));
+                    const quantity   = Math.abs(parseFloat(position.positionAmt));
 
-                    await this.executor.setStopLossAndTakeProfits(
-                        symbol,
-                        orderDetails.side,
+                    if (!isTestnet) {
+                        const symbolInfo = await this.client.getSymbolInfo(symbol);
+                        await this.executor.setStopLossAndTakeProfits(
+                            symbol, orderDetails.side, entryPrice, quantity,
+                            { stopLoss: orderDetails.stopLoss, takeProfit1: orderDetails.takeProfit1 },
+                            symbolInfo
+                        );
+                    } else {
+                        this.logger.info(`🧪 Testnet: software SL/TP activated for filled limit order ${symbol}`);
+                    }
+
+                    this.addPosition(symbol, {
+                        side:           orderDetails.side,
                         entryPrice,
-                        quantity,
-                        {
-                            stopLoss: orderDetails.stopLoss,
-                            takeProfit1: orderDetails.takeProfit1,
-                            takeProfit2: orderDetails.takeProfit2,
-                            takeProfit3: orderDetails.takeProfit3,
-                            ctcLevel: orderDetails.ctcLevel
-                        },
-                        symbolInfo
-                    );
+                        orderType:      'LIMIT',
+                        ctcEnabled:     orderDetails.ctcEnabled    || false,
+                        ctcTrigger:     orderDetails.ctcTrigger    || 0.5,
+                        holdingCandles: orderDetails.holdingCandles || 0,
+                        tradeStartTime: orderDetails.entryTime || orderDetails.tradeStartTime || Date.now(),
+                        softwareSLTP:   isTestnet,
+                        stopLoss:       orderDetails.stopLoss    || null,
+                        takeProfit1:    orderDetails.takeProfit1  || null
+                    });
 
-                    // Add to monitored positions
-                    this.addPosition(symbol, orderDetails.side, entryPrice, orderDetails.ctcLevel, 'LIMIT');
-
-                    // Remove from pending
                     this.pendingLimitOrders.delete(symbol);
                 }
             }
@@ -124,12 +224,12 @@ class PositionMonitor {
         }
     }
 
-    /**
-     * Check all monitored positions
-     */
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Main position check loop
+    // ─────────────────────────────────────────────────────────────────────────
+
     async checkPositions() {
         if (this.monitoredPositions.size === 0) return;
-
         try {
             for (const [symbol, positionData] of this.monitoredPositions.entries()) {
                 await this.checkPosition(symbol, positionData);
@@ -139,125 +239,195 @@ class PositionMonitor {
         }
     }
 
-    /**
-     * Check individual position for CTC trigger
-     */
     async checkPosition(symbol, positionData) {
         try {
-            // Get current position first (check if still exists)
             const positions = await this.client.getPositions(symbol);
-            const position = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
+            const position  = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
 
             if (!position) {
-                // Position closed - update trade status WITH LAST KNOWN PnL
+                // Position closed externally
                 this.logger.info(`📊 Position closed for ${symbol}`);
-                
-                // Use last known PnL (tracked before close)
-                const pnl = positionData.lastKnownPnL || 0;
-                const fees = Math.abs(pnl * 0.0004);
-                
-                // Update trade status in storage
-                try {
-                    const trades = await this.storage.getAllTrades();
-                    const openTrade = trades.find(t => t.symbol === symbol && t.status === 'open');
-                    
-                    if (openTrade) {
-                        await this.storage.updateTrade(openTrade.id, {
-                            status: 'closed',
-                            closedAt: Date.now(),
-                            closeReason: 'automatic', // TP or SL hit
-                            pnl,
-                            fees,
-                            netPnL: pnl - fees
-                        });
-                        this.logger.info(`✅ Updated trade ${openTrade.id}: PnL=$${pnl.toFixed(2)}, Fees=$${fees.toFixed(2)}, Status=closed`);
-                    }
-                } catch (err) {
-                    this.logger.error(`Failed to update trade status for ${symbol}:`, err.message);
-                }
-                
+                await this._recordClose(symbol, positionData, positionData.lastKnownPnL || 0, 'automatic');
                 this.monitoredPositions.delete(symbol);
                 return;
             }
 
-            // Position still exists - UPDATE LAST KNOWN PnL
+            // Track PnL
             const currentPnL = parseFloat(position.unRealizedProfit);
             positionData.lastKnownPnL = currentPnL;
-            positionData.lastUpdated = Date.now();
+            positionData.lastUpdated  = Date.now();
             this.monitoredPositions.set(symbol, positionData);
 
-            // Skip CTC logic if already triggered or not enabled
-            if (positionData.ctcTriggered || positionData.ctcLevel === 'NONE') {
-                // Still alive, just no CTC action needed
-                return;
+            // ── HOLDING CANDLE CHECK ──────────────────────────────────────────
+            if (positionData.holdingEnabled && positionData.holdingCandles > 0) {
+                const elapsed = Math.floor((Date.now() - positionData.tradeStartTime) / CANDLE_INTERVAL_MS);
+                if (elapsed >= positionData.holdingCandles) {
+                    this.logger.info(
+                        `⏰ Holding limit reached for ${symbol}: ${elapsed}/${positionData.holdingCandles} candles — closing`
+                    );
+                    await this._closeForHolding(symbol, positionData);
+                    return;
+                }
             }
 
-            // Get open orders to check if TP hit (for CTC logic)
-            const openOrders = await this.client.getOpenOrders(symbol);
-            const tpOrders = openOrders.filter(o => o.type === 'TAKE_PROFIT_MARKET');
-
-            // Determine which TPs have been hit based on missing orders
-            // We placed 3 TPs, so if we have less than 3, some have hit
-            const tpsHit = 3 - tpOrders.length;
-
-            if (tpsHit === 0) {
-                // No TPs hit yet
-                return;
+            // ── SOFTWARE SL/TP CHECK (testnet) ───────────────────────────────
+            if (positionData.softwareSLTP) {
+                const closed = await this._checkSoftwareSLTP(symbol, positionData, position);
+                if (closed) return;
             }
 
-            // Check if CTC should trigger
-            let shouldTriggerCTC = false;
+            // ── CTC TRIGGER CHECK ─────────────────────────────────────────────
+            // CTC fires BEFORE TP is hit → moves SL to break-even, trade continues
+            if (positionData.ctcEnabled && !positionData.ctcTriggered && positionData.ctcTriggerPrice !== null) {
+                const markPrice = parseFloat(position.markPrice);
+                const isLong    = positionData.side === 'LONG';
+                const triggered = isLong
+                    ? markPrice >= positionData.ctcTriggerPrice
+                    : markPrice <= positionData.ctcTriggerPrice;
 
-            if (positionData.ctcLevel === 'TP1' && tpsHit >= 1) {
-                shouldTriggerCTC = true;
-            } else if (positionData.ctcLevel === 'TP2' && tpsHit >= 2) {
-                shouldTriggerCTC = true;
-            }
+                if (triggered) {
+                    this.logger.info(
+                        `🔄 CTC triggered for ${symbol} | mark: ${markPrice} | trigger: ${positionData.ctcTriggerPrice?.toFixed(4)}`
+                    );
 
-            if (shouldTriggerCTC) {
-                this.logger.info(`🔄 CTC triggered for ${symbol} after ${positionData.ctcLevel} hit`);
+                    const feeBuffer = 0.0004;
+                    const bePrice = isLong
+                        ? positionData.entryPrice * (1 + feeBuffer)
+                        : positionData.entryPrice * (1 - feeBuffer);
 
-                // Move SL to break-even
-                const symbolInfo = await this.client.getSymbolInfo(symbol);
-                await this.executor.moveStopLossToBreakEven(
-                    symbol,
-                    positionData.side,
-                    positionData.entryPrice,
-                    symbolInfo
-                );
-
-                // Mark as triggered
-                positionData.ctcTriggered = true;
-                this.monitoredPositions.set(symbol, positionData);
+                    if (positionData.softwareSLTP) {
+                        // Software mode: update in-memory SL to break-even
+                        positionData.stopLoss     = bePrice;
+                        positionData.ctcTriggered = true;
+                        this.monitoredPositions.set(symbol, positionData);
+                        this.logger.info(`✅ CTC (software): SL moved to break-even at ${bePrice.toFixed(2)}`);
+                    } else {
+                        // Live mode: place exchange SL order at break-even
+                        const symbolInfo = await this.client.getSymbolInfo(symbol);
+                        await this.executor.moveStopLossToBreakEven(
+                            symbol, positionData.side, positionData.entryPrice, symbolInfo
+                        );
+                        positionData.ctcTriggered = true;
+                        this.monitoredPositions.set(symbol, positionData);
+                    }
+                }
             }
 
         } catch (error) {
-            this.logger.error(`Error checking position for ${symbol}:`, error.message);
+            this.logger.error(`Error checking position ${symbol}:`, error.message);
         }
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Software SL/TP logic — single TP model
+    // ─────────────────────────────────────────────────────────────────────────
+
     /**
-     * Remove position from monitoring
+     * Check mark price against software SL/TP levels.
+     * Single TP model: 100% close on SL hit OR TP hit.
+     * Returns true if the position was fully closed.
      */
-    removePosition(symbol) {
-        this.monitoredPositions.delete(symbol);
-        this.logger.info(`🗑️ Stopped monitoring ${symbol}`);
+    async _checkSoftwareSLTP(symbol, positionData, position) {
+        const markPrice = parseFloat(position.markPrice);
+        const isLong    = positionData.side === 'LONG';
+
+        // ── Stop Loss — close 100% ────────────────────────────────────────────
+        if (positionData.stopLoss) {
+            const slHit = isLong
+                ? markPrice <= positionData.stopLoss
+                : markPrice >= positionData.stopLoss;
+
+            if (slHit) {
+                this.logger.info(
+                    `🛑 SL hit for ${symbol}: mark=${markPrice} | SL=${positionData.stopLoss}`
+                );
+                await this._closeFullPosition(symbol, positionData, position, 'software-sl');
+                return true;
+            }
+        }
+
+        // ── Single TP — close 100% ────────────────────────────────────────────
+        if (!positionData.tpHit && positionData.takeProfit1) {
+            const tpHit = isLong
+                ? markPrice >= positionData.takeProfit1
+                : markPrice <= positionData.takeProfit1;
+
+            if (tpHit) {
+                this.logger.info(
+                    `🎯 TP hit for ${symbol}: mark=${markPrice} | TP=${positionData.takeProfit1}`
+                );
+                positionData.tpHit = true;
+                this.monitoredPositions.set(symbol, positionData);
+                await this._closeFullPosition(symbol, positionData, position, 'software-tp');
+                return true;
+            }
+        }
+
+        return false;
     }
 
-    /**
-     * OPTION 3: Safety check for unprotected positions
-     * Checks every open position has a SL, if not tries to set it from database or closes position
-     */
-    async safetyCheckUnprotectedPositions() {
-        try {
-            // Get all open positions from Binance
-            const allPositions = await this.client.getPositions();
-            const openPositions = allPositions.filter(p => parseFloat(p.positionAmt) !== 0);
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Close helpers
+    // ─────────────────────────────────────────────────────────────────────────
 
+    async _closeFullPosition(symbol, positionData, position, reason) {
+        const pnl = position ? parseFloat(position.unRealizedProfit) : (positionData.lastKnownPnL || 0);
+        await this.executor.closePosition(symbol, reason);
+        await this._recordClose(symbol, positionData, pnl, reason);
+        this.monitoredPositions.delete(symbol);
+    }
+
+    async _closeForHolding(symbol, positionData) {
+        try {
+            const positions = await this.client.getPositions(symbol);
+            const position  = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
+            const pnl = position
+                ? parseFloat(position.unRealizedProfit)
+                : (positionData.lastKnownPnL || 0);
+
+            await this.executor.closePosition(symbol, 'holding-candles-limit');
+            await this._recordClose(symbol, positionData, pnl, 'holding-candles-limit');
+            this.monitoredPositions.delete(symbol);
+        } catch (err) {
+            this.logger.error(`Failed to close ${symbol} on holding limit:`, err.message);
+        }
+    }
+
+    async _recordClose(symbol, positionData, pnl, reason) {
+        try {
+            const trades    = await this.storage.getAllTrades();
+            const openTrade = trades.find(t => t.symbol === symbol && t.status === 'open');
+            if (openTrade) {
+                const fees = Math.abs(pnl * 0.0004);
+                await this.storage.updateTrade(openTrade.id, {
+                    status:      'closed',
+                    closedAt:    Date.now(),
+                    closeReason: reason,
+                    pnl,
+                    fees,
+                    netPnL:      pnl - fees
+                });
+                this.logger.info(`✅ Trade ${openTrade.id} closed (${reason}): PnL=$${pnl.toFixed(2)}`);
+            }
+        } catch (err) {
+            this.logger.error(`Failed to update trade record for ${symbol}:`, err.message);
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Safety check (live mode only)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    async safetyCheckUnprotectedPositions() {
+        // On testnet, positions are protected by software SL/TP — skip exchange SL check
+        if (this.client.isTestnet()) return;
+
+        try {
+            const allPositions  = await this.client.getPositions();
+            const openPositions = allPositions.filter(p => parseFloat(p.positionAmt) !== 0);
             if (openPositions.length === 0) return;
 
             this.logger.debug(`🛡️ Safety check: ${openPositions.length} open positions`);
-
             for (const position of openPositions) {
                 await this.checkPositionHasStopLoss(position);
             }
@@ -266,64 +436,53 @@ class PositionMonitor {
         }
     }
 
-    /**
-     * Check if a specific position has a stop loss, if not try to set it or close position
-     */
     async checkPositionHasStopLoss(position) {
         const symbol = position.symbol;
-        
         try {
-            // Check if position has a SL order
-            const openOrders = await this.client.getOpenOrders(symbol);
-            const hasStopLoss = openOrders.some(o => o.type === 'STOP_MARKET');
-
-            if (hasStopLoss) {
-                // Position is protected - all good!
+            // If this position runs software SL/TP, skip exchange check
+            const monData = this.monitoredPositions.get(symbol);
+            if (monData && monData.softwareSLTP) {
+                this.logger.debug(`🛡️ ${symbol}: software SL/TP active, skipping exchange SL check`);
                 return;
             }
 
-            // NO STOP LOSS! This is dangerous
-            this.logger.warn(`⚠️ UNPROTECTED POSITION DETECTED: ${symbol} has NO Stop Loss!`);
+            const openOrders  = await this.client.getOpenOrders(symbol);
+            const hasStopLoss = openOrders.some(o => o.type === 'STOP_MARKET');
+            if (hasStopLoss) return;
 
-            // Try to find SL from database
+            this.logger.warn(`⚠️ UNPROTECTED POSITION: ${symbol} has NO Stop Loss!`);
+
             const trades = await this.storage.getAllTrades();
-            const trade = trades.find(t => t.symbol === symbol && t.status === 'open');
+            const trade  = trades.find(t => t.symbol === symbol && t.status === 'open');
 
             if (!trade || !trade.signal || !trade.signal.stopLoss) {
-                // No trade record or no SL in database - CLOSE IMMEDIATELY
-                this.logger.error(`🚨 EMERGENCY: ${symbol} has no SL in database - CLOSING POSITION FOR SAFETY!`);
+                this.logger.error(`🚨 EMERGENCY: ${symbol} — no SL in DB → closing for safety`);
                 await this.executor.closePosition(symbol, 'emergency-no-sl-data');
                 this.monitoredPositions.delete(symbol);
                 return;
             }
 
-            // Database has SL - try to set it
-            this.logger.info(`🔧 Attempting to set missing SL for ${symbol} from database: ${trade.signal.stopLoss}`);
-
+            this.logger.info(`🔧 Setting missing SL for ${symbol} from DB: ${trade.signal.stopLoss}`);
             const symbolInfo = await this.client.getSymbolInfo(symbol);
-            const isLong = parseFloat(position.positionAmt) > 0;
-            const slPrice = this.executor.roundToTickSize(
-                trade.signal.stopLoss,
-                symbolInfo.tickSize,
-                symbolInfo.pricePrecision
+            const isLong     = parseFloat(position.positionAmt) > 0;
+            const slPrice    = this.executor.roundToTickSize(
+                trade.signal.stopLoss, symbolInfo.tickSize, symbolInfo.pricePrecision
             );
+            const posQty = Math.abs(parseFloat(position.positionAmt));
 
-            // Try to place the SL
             try {
                 await this.client.placeOrder({
                     symbol,
-                    side: isLong ? 'SELL' : 'BUY',
-                    type: 'STOP_MARKET',
-                    closePosition: 'true',
-                    stopPrice: slPrice.toString(),
+                    side:        isLong ? 'SELL' : 'BUY',
+                    type:        'STOP_MARKET',
+                    quantity:    posQty.toString(),
+                    stopPrice:   slPrice.toString(),
+                    reduceOnly:  'true',
                     workingType: 'MARK_PRICE'
                 });
-
-                this.logger.info(`✅ Successfully set missing SL for ${symbol} at ${slPrice}`);
+                this.logger.info(`✅ Missing SL set for ${symbol} at ${slPrice}`);
             } catch (slError) {
-                // Failed to set SL - CLOSE POSITION FOR SAFETY
-                this.logger.error(`🚨 EMERGENCY: Failed to set SL for ${symbol} - CLOSING POSITION FOR SAFETY!`);
-                this.logger.error(`SL Error: ${slError.message}`);
+                this.logger.error(`🚨 EMERGENCY: Failed to set SL for ${symbol} → closing for safety`);
                 await this.executor.closePosition(symbol, 'emergency-sl-failed');
                 this.monitoredPositions.delete(symbol);
             }
@@ -333,17 +492,46 @@ class PositionMonitor {
         }
     }
 
-    /**
-     * Get monitoring status
-     */
+    // ─────────────────────────────────────────────────────────────────────────
+    //  Status / getters
+    // ─────────────────────────────────────────────────────────────────────────
+
     getStatus() {
+        const positions = Array.from(this.monitoredPositions.entries()).map(([symbol, data]) => {
+            const elapsed = data.tradeStartTime
+                ? Math.floor((Date.now() - data.tradeStartTime) / CANDLE_INTERVAL_MS)
+                : 0;
+            return {
+                symbol,
+                side:            data.side,
+                entryPrice:      data.entryPrice,
+                orderType:       data.orderType,
+                // CTC
+                ctcEnabled:      data.ctcEnabled,
+                ctcTrigger:      data.ctcTrigger,
+                ctcTriggerPrice: data.ctcTriggerPrice,
+                ctcTriggered:    data.ctcTriggered,
+                // Holding
+                holdingCandles:  data.holdingCandles,
+                holdingEnabled:  data.holdingEnabled,
+                tradeStartTime:  data.tradeStartTime,
+                elapsedCandles:  elapsed,
+                // Software SL/TP — single TP model
+                softwareSLTP:    data.softwareSLTP,
+                stopLoss:        data.stopLoss,
+                takeProfit1:     data.takeProfit1,
+                tpHit:           data.tpHit,
+                // Live PnL
+                lastKnownPnL:    data.lastKnownPnL,
+                lastUpdated:     data.lastUpdated
+            };
+        });
+
         return {
             monitoredPositions: this.monitoredPositions.size,
             pendingLimitOrders: this.pendingLimitOrders.size,
-            positions: Array.from(this.monitoredPositions.entries()).map(([symbol, data]) => ({
-                symbol,
-                ...data
-            }))
+            tradeMode:          this.client.tradeMode,
+            positions
         };
     }
 }

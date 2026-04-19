@@ -92,28 +92,42 @@ class SignalTradingBot {
             // Execute trade
             const result = await this.executor.executeTrade(signal);
 
-            // Save trade to storage
+            // Save trade to storage with all new fields
             const tradeId = await this.storage.saveTrade({
                 ...result,
                 signal,
-                status: signal.orderType === 'MARKET' ? 'open' : 'pending',
-                ctcLevel: signal.ctcLevel
+                status: (signal.orderType || 'MARKET') === 'MARKET' ? 'open' : 'pending',
+                ctcEnabled: result.ctcEnabled,
+                ctcTrigger: result.ctcTrigger,
+                holdingCandles: result.holdingCandles,
+                tradeStartTime: result.tradeStartTime
             });
 
-            // Add to monitor
-            if (signal.orderType === 'MARKET') {
-                this.monitor.addPosition(
-                    signal.symbol,
-                    signal.side,
-                    result.price,
-                    signal.ctcLevel,
-                    'MARKET'
-                );
+            // Add to monitor with new option-based signature
+            if ((signal.orderType || 'MARKET') === 'MARKET') {
+                this.monitor.addPosition(signal.symbol, {
+                    side: result.side,
+                    entryPrice: result.price,
+                    orderType: 'MARKET',
+                    ctcEnabled: result.ctcEnabled,
+                    ctcTrigger: result.ctcTrigger,
+                    tp3Price: result.takeProfit3 || null,
+                    holdingCandles: result.holdingCandles,
+                    tradeStartTime: result.tradeStartTime
+                });
             } else {
                 // Limit order - monitor for fill
                 this.monitor.addPendingLimitOrder(signal.symbol, {
                     ...signal,
-                    orderId: result.orderId
+                    side: result.side,
+                    takeProfit1: result.takeProfit1,
+                    takeProfit2: result.takeProfit2,
+                    takeProfit3: result.takeProfit3,
+                    orderId: result.orderId,
+                    ctcEnabled: result.ctcEnabled,
+                    ctcTrigger: result.ctcTrigger,
+                    holdingCandles: result.holdingCandles,
+                    tradeStartTime: result.tradeStartTime
                 });
             }
 
@@ -128,34 +142,49 @@ class SignalTradingBot {
 
     /**
      * Validate trade signal
+     * Supports both legacy format and new provider format
      */
     validateSignal(signal) {
-        const required = ['symbol', 'side', 'orderType', 'walletPercentage', 'stopLoss', 'takeProfit1', 'takeProfit2', 'takeProfit3', 'ctcLevel'];
+        // Required in all cases
+        if (!signal.symbol) throw new Error('Missing required field: symbol');
+        if (!signal.side && !signal.direction) throw new Error('Missing required field: side or direction');
+        if (!signal.stopLoss) throw new Error('Missing required field: stopLoss');
+        if (!signal.leverage) throw new Error('Missing required field: leverage');
+        if (!signal.riskMode) throw new Error('Missing required field: riskMode');
 
-        for (const field of required) {
-            if (!signal[field]) {
-                throw new Error(`Missing required field: ${field}`);
+        // Must have R:R OR explicit TPs
+        const hasRR = !!signal.rr;
+        const hasTPs = !!(signal.takeProfit1 && signal.takeProfit2 && signal.takeProfit3);
+        if (!hasRR && !hasTPs) {
+            throw new Error('Must provide either rr (risk:reward ratio) OR takeProfit1/2/3');
+        }
+
+        // Validate side/direction
+        if (signal.side && !['LONG', 'SHORT'].includes(signal.side)) {
+            throw new Error('Invalid side: must be LONG or SHORT');
+        }
+        if (signal.direction && !['BUY', 'SELL'].includes(signal.direction)) {
+            throw new Error('Invalid direction: must be BUY or SELL');
+        }
+
+        // Margin validation
+        const marginMode = signal.marginMode || 'percent';
+        if (marginMode === 'dollar') {
+            if (!signal.marginDollar || signal.marginDollar <= 0) {
+                throw new Error('marginDollar must be > 0 when marginMode=dollar');
+            }
+        } else {
+            if (!signal.walletPercentage || signal.walletPercentage < 1 || signal.walletPercentage > 100) {
+                throw new Error('walletPercentage must be between 1 and 100');
             }
         }
 
-        if (!['LONG', 'SHORT'].includes(signal.side)) {
-            throw new Error('Invalid side: must be LONG or SHORT');
-        }
-
-        if (!['MARKET', 'LIMIT'].includes(signal.orderType)) {
+        if (!['MARKET', 'LIMIT'].includes(signal.orderType || 'MARKET')) {
             throw new Error('Invalid orderType: must be MARKET or LIMIT');
         }
 
-        if (signal.orderType === 'LIMIT' && !signal.limitPrice) {
+        if ((signal.orderType === 'LIMIT') && !signal.limitPrice) {
             throw new Error('limitPrice required for LIMIT orders');
-        }
-
-        if (!['NONE', 'TP1', 'TP2'].includes(signal.ctcLevel)) {
-            throw new Error('Invalid ctcLevel: must be NONE, TP1, or TP2');
-        }
-
-        if (signal.walletPercentage < 1 || signal.walletPercentage > 100) {
-            throw new Error('walletPercentage must be between 1 and 100');
         }
     }
 

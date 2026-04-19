@@ -1,6 +1,6 @@
 /**
  * Trade Executor Module
- * Handles trade execution with market/limit orders, TP/SL management, and CTC functionality
+ * Handles trade execution with market/limit orders, TP/SL management, CTC and R:R functionality
  */
 
 class TradeExecutor {
@@ -17,82 +17,154 @@ class TradeExecutor {
         const margin = (balance * walletPercentage) / 100;
         const notionalValue = margin * leverage;
         const quantity = notionalValue / price;
-
-        // Round to step size
         const roundedQuantity = Math.floor(quantity / stepSize) * stepSize;
         return parseFloat(roundedQuantity.toFixed(8));
     }
 
     /**
+     * Calculate position size based on fixed dollar margin amount
+     * Used when signal provider specifies margin in $
+     */
+    calculatePositionSizeFromDollar(marginDollar, price, leverage, stepSize) {
+        const notionalValue = marginDollar * leverage;
+        const quantity = notionalValue / price;
+        const roundedQuantity = Math.floor(quantity / stepSize) * stepSize;
+        return parseFloat(roundedQuantity.toFixed(8));
+    }
+
+    /**
+     * Compute single TP from R:R ratio.
+     * Signal provider provides rr (e.g. 2.5) → tp = entry ± slDist × rr
+     *
+     * @param {number} entryPrice
+     * @param {number} stopLoss
+     * @param {number} rr  - risk:reward (e.g. 2.5 means 1:2.5)
+     * @param {string} side - 'LONG' or 'SHORT'
+     * @returns {number} takeProfit1
+     */
+    computeTPFromRR(entryPrice, stopLoss, rr, side) {
+        const slDist = Math.abs(entryPrice - stopLoss);
+        const tpDist = slDist * rr;
+        return side === 'LONG'
+            ? entryPrice + tpDist
+            : entryPrice - tpDist;
+    }
+
+    /**
      * Execute a trade based on signal
-     * @param {Object} signal - Trade signal with all parameters
+     *
+     * Signal fields (from provider):
+     *   symbol         - trading pair (e.g. BTCUSDT)
+     *   direction      - 'BUY' | 'SELL'  (alternative to side)
+     *   side           - 'LONG' | 'SHORT' (alternative to direction)
+     *   orderType      - 'MARKET' | 'LIMIT'
+     *   limitPrice     - required for LIMIT orders
+     *   leverage       - 1-125
+     *   riskMode       - 'isolated' | 'crossed'
+     *   stopLoss       - stop loss price
+     *   rr             - risk:reward ratio  → TPs computed automatically
+     *   takeProfit1/2/3 - manual TPs (overrides rr if provided)
+     *   marginMode     - 'percent' | 'dollar'  (default: 'percent')
+     *   walletPercentage - % of wallet (when marginMode=percent)
+     *   marginDollar   - fixed $ per trade (when marginMode=dollar)
+     *   ctcEnabled     - boolean, enable CTC (close-to-cost)
+     *   ctcTrigger     - fraction of TP dist to trigger CTC (0.4 = 40%)
+     *   holdingCandles - number of 3-min candles before force-close (0 = disabled)
+     *   entryTime      - unix ms timestamp of signal entry (for holding count)
      */
     async executeTrade(signal) {
+        // --- Resolve direction → side ---
+        let side = signal.side;
+        if (!side && signal.direction) {
+            side = signal.direction === 'BUY' ? 'LONG' : 'SHORT';
+        }
+        if (!side) side = 'LONG'; // final fallback
+
         const {
             symbol,
-            side, // 'LONG' or 'SHORT'
-            orderType, // 'MARKET' or 'LIMIT'
-            limitPrice, // Only for limit orders
-            walletPercentage,
-            leverage, // Leverage from admin
-            riskMode, // Risk mode from admin
+            orderType = 'MARKET',
+            limitPrice,
+            leverage,
+            riskMode,
             stopLoss,
-            takeProfit1,
-            takeProfit2,
-            takeProfit3,
-            ctcLevel // 'TP1', 'TP2', or 'NONE'
+            ctcEnabled = false,
+            ctcTrigger = 0.5,
+            holdingCandles = 0,
+            entryTime
         } = signal;
 
         try {
             this.logger.info(`🎯 Executing ${orderType} ${side} trade for ${symbol} (${leverage}x ${riskMode})`);
 
-            // Get symbol info
             const symbolInfo = await this.client.getSymbolInfo(symbol);
             const currentPrice = await this.client.getPrice(symbol);
 
-            // Validate SL/TP prices BEFORE executing trade
+            // Entry price for calculations
             const entryPrice = orderType === 'MARKET' ? currentPrice : limitPrice;
-            const validation = this.validateSLTP(side, entryPrice, stopLoss, takeProfit1, takeProfit2, takeProfit3);
+
+            // --- Resolve single TP from R:R ---
+            // R:R is always provided by signal provider.
+            // TP = full risk × rr distance (one TP, 100% close at that level).
+            let takeProfit1 = this.computeTPFromRR(entryPrice, stopLoss, signal.rr, side);
+            this.logger.info(
+                `📐 Single TP from R:R ${signal.rr}: TP=${takeProfit1.toFixed(4)} | SL=${stopLoss}`
+            );
+
+            // Validate SL/TP direction
+            const validation = this.validateSLTP(side, entryPrice, stopLoss, takeProfit1);
             if (!validation.valid) {
                 throw new Error(`❌ Validation Failed: ${validation.error}`);
             }
 
-            // Set leverage and margin type from signal
+            // Set leverage and margin type
             await this.client.setMarginType(symbol, riskMode);
             await this.client.setLeverage(symbol, leverage);
 
-            // Get balance
             const balance = await this.client.getBalance();
             this.logger.info(`💰 Available balance: $${balance.available.toFixed(2)}`);
 
-            // Calculate position size
-            const quantity = this.calculatePositionSize(
-                balance.available,
-                walletPercentage,
-                orderType === 'MARKET' ? currentPrice : limitPrice,
-                leverage,
-                symbolInfo.stepSize
-            );
+            // --- Position sizing ---
+            const priceForSize = orderType === 'MARKET' ? currentPrice : limitPrice;
+            let quantity;
+
+            if (signal.marginMode === 'dollar' && signal.marginDollar > 0) {
+                quantity = this.calculatePositionSizeFromDollar(
+                    signal.marginDollar,
+                    priceForSize,
+                    leverage,
+                    symbolInfo.stepSize
+                );
+                this.logger.info(`💵 Dollar margin: $${signal.marginDollar} → qty ${quantity}`);
+            } else {
+                const walletPct = signal.walletPercentage || 10;
+                quantity = this.calculatePositionSize(
+                    balance.available,
+                    walletPct,
+                    priceForSize,
+                    leverage,
+                    symbolInfo.stepSize
+                );
+                this.logger.info(`📊 Percent margin: ${walletPct}% → qty ${quantity}`);
+            }
 
             if (quantity < symbolInfo.minQuantity) {
                 throw new Error(`Quantity ${quantity} below minimum ${symbolInfo.minQuantity}`);
             }
 
-            this.logger.info(`📊 Position size: ${quantity} ${symbol.replace('USDT', '')} @ ${orderType === 'MARKET' ? currentPrice : limitPrice}`);
-
-            // OPTION 2: Pre-validate SL/TP prices before executing
+            // Pre-validate SL/TP orders won't immediately trigger
             this.logger.info('🔍 Pre-validating SL/TP orders...');
             const testValidation = await this.testSLTPOrders(symbol, side, entryPrice, quantity, {
-                stopLoss, takeProfit1, takeProfit2, takeProfit3
+                stopLoss, takeProfit1
             }, symbolInfo);
-            
             if (!testValidation.valid) {
                 throw new Error(`❌ Pre-validation failed: ${testValidation.error}`);
             }
             this.logger.info('✅ Pre-validation passed');
 
-            // Place entry order
+            const tpSlConfig = { stopLoss, takeProfit1, ctcEnabled, ctcTrigger };
             let entryOrder;
+            let softwareSLTP = false;
+
             if (orderType === 'MARKET') {
                 entryOrder = await this.client.placeOrder({
                     symbol,
@@ -100,33 +172,31 @@ class TradeExecutor {
                     type: 'MARKET',
                     quantity: quantity.toString()
                 });
-
                 this.logger.info(`✅ Market order executed: ${entryOrder.orderId}`);
 
-                // Wait for fill and set SL/TP with retry
                 await new Promise(resolve => setTimeout(resolve, 500));
                 const fillPrice = await this.getActualEntryPrice(symbol, currentPrice);
-                
-                // Try to set SL/TP with retry mechanism
-                const slTpSuccess = await this.setStopLossAndTakeProfitsWithRetry(symbol, side, fillPrice, quantity, {
-                    stopLoss,
-                    takeProfit1,
-                    takeProfit2,
-                    takeProfit3,
-                    ctcLevel
-                }, symbolInfo);
-                
-                if (!slTpSuccess) {
-                    // If SL/TP failed after retries, close the position immediately
-                    this.logger.error('🚨 CRITICAL: Failed to set SL/TP after retries - CLOSING POSITION!');
-                    await this.closePosition(symbol, 'safety-no-sl');
-                    throw new Error('Failed to protect position with SL/TP - Position closed for safety');
+
+                if (this.client.isTestnet()) {
+                    // Testnet blocks STOP_MARKET / TAKE_PROFIT_MARKET (-4120)
+                    // Position is protected by software SL/TP in the position monitor
+                    this.logger.info('🧪 Testnet: skipping exchange SL/TP orders — software SL/TP active');
+                    softwareSLTP = true;
+                } else {
+                    const slTpSuccess = await this.setStopLossAndTakeProfitsWithRetry(
+                        symbol, side, fillPrice, quantity, tpSlConfig, symbolInfo
+                    );
+
+                    if (!slTpSuccess) {
+                        this.logger.error('🚨 CRITICAL: Failed to set SL/TP after retries - CLOSING POSITION!');
+                        await this.closePosition(symbol, 'safety-no-sl');
+                        throw new Error('Failed to protect position with SL/TP - Position closed for safety');
+                    }
                 }
 
             } else {
                 // LIMIT order
                 const roundedPrice = this.roundToTickSize(limitPrice, symbolInfo.tickSize, symbolInfo.pricePrecision);
-
                 entryOrder = await this.client.placeOrder({
                     symbol,
                     side: side === 'LONG' ? 'BUY' : 'SELL',
@@ -135,12 +205,15 @@ class TradeExecutor {
                     price: roundedPrice.toString(),
                     timeInForce: 'GTC'
                 });
-
                 this.logger.info(`✅ Limit order placed at ${roundedPrice}: ${entryOrder.orderId}`);
-                this.logger.info(`⏳ Waiting for fill... SL/TP will be set automatically after fill`);
-
-                // Store order info for monitoring (will be handled by position monitor)
+                if (this.client.isTestnet()) {
+                    softwareSLTP = true;
+                    this.logger.info('🧪 Testnet: limit order — software SL/TP will activate on fill');
+                }
             }
+
+            // Trade start time: use signal entryTime if provided, else now
+            const tradeStartTime = entryTime || Date.now();
 
             return {
                 success: true,
@@ -149,7 +222,15 @@ class TradeExecutor {
                 side,
                 orderType,
                 quantity,
-                price: orderType === 'MARKET' ? currentPrice : limitPrice
+                price: orderType === 'MARKET' ? currentPrice : limitPrice,
+                stopLoss,
+                takeProfit1,
+                rr: signal.rr,
+                ctcEnabled: !!ctcEnabled,
+                ctcTrigger,
+                holdingCandles,
+                tradeStartTime,
+                softwareSLTP
             };
 
         } catch (error) {
@@ -165,7 +246,6 @@ class TradeExecutor {
         try {
             const positions = await this.client.getPositions(symbol);
             const position = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
-
             if (position && parseFloat(position.entryPrice) > 0) {
                 this.logger.info(`✅ Actual entry price: ${position.entryPrice}`);
                 return parseFloat(position.entryPrice);
@@ -177,76 +257,38 @@ class TradeExecutor {
     }
 
     /**
-     * Set stop loss and take profit orders with CTC functionality
+     * Set stop loss and single take profit orders (100% position close at TP)
      */
     async setStopLossAndTakeProfits(symbol, side, entryPrice, quantity, tpSlConfig, symbolInfo) {
-        const { stopLoss, takeProfit1, takeProfit2, takeProfit3, ctcLevel } = tpSlConfig;
+        const { stopLoss, takeProfit1 } = tpSlConfig;
         const isLong = side === 'LONG';
 
         try {
-            // Calculate SL price
+            // Stop Loss
             const slPrice = this.roundToTickSize(stopLoss, symbolInfo.tickSize, symbolInfo.pricePrecision);
-
-            // Place Stop Loss (closes entire position)
             await this.client.placeOrder({
                 symbol,
-                side: isLong ? 'SELL' : 'BUY',
-                type: 'STOP_MARKET',
-                closePosition: 'true',
-                stopPrice: slPrice.toString(),
+                side:        isLong ? 'SELL' : 'BUY',
+                type:        'STOP_MARKET',
+                quantity:    quantity.toString(),
+                stopPrice:   slPrice.toString(),
+                reduceOnly:  'true',
                 workingType: 'MARK_PRICE'
             });
+            this.logger.info(`✅ Stop Loss set at ${slPrice} (qty: ${quantity})`);
 
-            this.logger.info(`✅ Stop Loss set at ${slPrice}`);
-
-            // Calculate TP quantities (distribute across 3 TPs)
-            const tp1Qty = this.roundToStepSize(quantity * 0.33, symbolInfo.stepSize, symbolInfo.quantityPrecision);
-            const tp2Qty = this.roundToStepSize(quantity * 0.33, symbolInfo.stepSize, symbolInfo.quantityPrecision);
-            const tp3Qty = this.roundToStepSize(quantity - tp1Qty - tp2Qty, symbolInfo.stepSize, symbolInfo.quantityPrecision);
-
-            // Place TP1
+            // Single TP — 100% of position
             const tp1Price = this.roundToTickSize(takeProfit1, symbolInfo.tickSize, symbolInfo.pricePrecision);
             await this.client.placeOrder({
                 symbol,
-                side: isLong ? 'SELL' : 'BUY',
-                type: 'TAKE_PROFIT_MARKET',
-                quantity: tp1Qty.toString(),
-                stopPrice: tp1Price.toString(),
-                reduceOnly: 'true',
+                side:        isLong ? 'SELL' : 'BUY',
+                type:        'TAKE_PROFIT_MARKET',
+                quantity:    quantity.toString(),
+                stopPrice:   tp1Price.toString(),
+                reduceOnly:  'true',
                 workingType: 'MARK_PRICE'
             });
-            this.logger.info(`✅ TP1 set at ${tp1Price} (33% - ${tp1Qty})`);
-
-            // Place TP2
-            const tp2Price = this.roundToTickSize(takeProfit2, symbolInfo.tickSize, symbolInfo.pricePrecision);
-            await this.client.placeOrder({
-                symbol,
-                side: isLong ? 'SELL' : 'BUY',
-                type: 'TAKE_PROFIT_MARKET',
-                quantity: tp2Qty.toString(),
-                stopPrice: tp2Price.toString(),
-                reduceOnly: 'true',
-                workingType: 'MARK_PRICE'
-            });
-            this.logger.info(`✅ TP2 set at ${tp2Price} (33% - ${tp2Qty})`);
-
-            // Place TP3
-            const tp3Price = this.roundToTickSize(takeProfit3, symbolInfo.tickSize, symbolInfo.pricePrecision);
-            await this.client.placeOrder({
-                symbol,
-                side: isLong ? 'SELL' : 'BUY',
-                type: 'TAKE_PROFIT_MARKET',
-                quantity: tp3Qty.toString(),
-                stopPrice: tp3Price.toString(),
-                reduceOnly: 'true',
-                workingType: 'MARK_PRICE'
-            });
-            this.logger.info(`✅ TP3 set at ${tp3Price} (34% - ${tp3Qty})`);
-
-            // Store CTC level for monitoring
-            if (ctcLevel !== 'NONE') {
-                this.logger.info(`🔄 CTC enabled: Will move SL to break-even after ${ctcLevel} hit`);
-            }
+            this.logger.info(`✅ TP set at ${tp1Price} (100% - ${quantity})`);
 
             return { success: true };
 
@@ -262,35 +304,42 @@ class TradeExecutor {
     async moveStopLossToBreakEven(symbol, side, entryPrice, symbolInfo) {
         try {
             const isLong = side === 'LONG';
-
-            // Calculate break-even price (entry + minimal buffer for fees)
-            const feeBuffer = 0.0004; // ~0.04% to cover trading fees (maker/taker)
+            const feeBuffer = 0.0004; // ~0.04% to cover fees
             const breakEvenPrice = isLong
                 ? entryPrice * (1 + feeBuffer)
                 : entryPrice * (1 - feeBuffer);
 
             const slPrice = this.roundToTickSize(breakEvenPrice, symbolInfo.tickSize, symbolInfo.pricePrecision);
 
-            // Cancel existing SL
+            // Cancel existing SL orders
             const openOrders = await this.client.getOpenOrders(symbol);
             const existingSL = openOrders.find(o => o.type === 'STOP_MARKET');
-
             if (existingSL) {
                 await this.client.cancelOrder(symbol, existingSL.orderId);
                 this.logger.info(`🗑️ Cancelled old SL at ${existingSL.stopPrice}`);
             }
 
-            // Place new SL at break-even
+            // Get current position quantity (needed for reduceOnly order)
+            const positions = await this.client.getPositions(symbol);
+            const position = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
+            if (!position) {
+                this.logger.warn(`⚠️ No open position for ${symbol} when moving SL to break-even`);
+                return { success: false, reason: 'no-position' };
+            }
+            const posQty = Math.abs(parseFloat(position.positionAmt));
+
+            // Place new SL using reduceOnly (NOT closePosition — routes to Algo API on newer testnet)
             await this.client.placeOrder({
                 symbol,
                 side: isLong ? 'SELL' : 'BUY',
                 type: 'STOP_MARKET',
-                closePosition: 'true',
+                quantity: posQty.toString(),
                 stopPrice: slPrice.toString(),
+                reduceOnly: 'true',
                 workingType: 'MARK_PRICE'
             });
 
-            this.logger.info(`✅ CTC: Stop Loss moved to break-even at ${slPrice}`);
+            this.logger.info(`✅ CTC: Stop Loss moved to break-even at ${slPrice} (qty: ${posQty})`);
             return { success: true };
 
         } catch (error) {
@@ -315,10 +364,7 @@ class TradeExecutor {
             const quantity = Math.abs(parseFloat(position.positionAmt));
             const side = parseFloat(position.positionAmt) > 0 ? 'SELL' : 'BUY';
 
-            // Cancel all orders first
             await this.client.cancelAllOrders(symbol);
-
-            // Close position
             const order = await this.client.placeOrder({
                 symbol,
                 side,
@@ -336,55 +382,31 @@ class TradeExecutor {
         }
     }
 
-    /**
-     * Round price to tick size
-     */
     roundToTickSize(price, tickSize, precision) {
         const rounded = Math.round(price / tickSize) * tickSize;
         return parseFloat(rounded.toFixed(precision));
     }
 
-    /**
-     * Round quantity to step size
-     */
     roundToStepSize(quantity, stepSize, precision) {
         const rounded = Math.floor(quantity / stepSize) * stepSize;
         return parseFloat(rounded.toFixed(precision));
     }
 
-    /**
-     * Test if SL/TP orders can be placed (pre-validation)
-     */
     async testSLTPOrders(symbol, side, entryPrice, quantity, prices, symbolInfo) {
-        const { stopLoss, takeProfit1, takeProfit2, takeProfit3 } = prices;
+        const { stopLoss, takeProfit1 } = prices;
         const isLong = side === 'LONG';
 
         try {
-            // Test SL price calculation
-            const slPrice = this.roundToTickSize(stopLoss, symbolInfo.tickSize, symbolInfo.pricePrecision);
-            
-            // Test TP price calculations
-            const tp1Price = this.roundToTickSize(takeProfit1, symbolInfo.tickSize, symbolInfo.pricePrecision);
-            const tp2Price = this.roundToTickSize(takeProfit2, symbolInfo.tickSize, symbolInfo.pricePrecision);
-            const tp3Price = this.roundToTickSize(takeProfit3, symbolInfo.tickSize, symbolInfo.pricePrecision);
-
-            // Verify prices won't immediately trigger
+            const slPrice  = this.roundToTickSize(stopLoss,     symbolInfo.tickSize, symbolInfo.pricePrecision);
+            const tp1Price = this.roundToTickSize(takeProfit1,   symbolInfo.tickSize, symbolInfo.pricePrecision);
             const currentPrice = await this.client.getPrice(symbol);
-            
+
             if (isLong) {
-                if (slPrice >= currentPrice) {
-                    return { valid: false, error: 'Stop Loss would trigger immediately (price too high)' };
-                }
-                if (tp1Price <= currentPrice || tp2Price <= currentPrice || tp3Price <= currentPrice) {
-                    return { valid: false, error: 'Take Profit would trigger immediately (price too low)' };
-                }
+                if (slPrice  >= currentPrice) return { valid: false, error: 'SL would trigger immediately (SL >= current price)' };
+                if (tp1Price <= currentPrice) return { valid: false, error: 'TP would trigger immediately (TP <= current price)' };
             } else {
-                if (slPrice <= currentPrice) {
-                    return { valid: false, error: 'Stop Loss would trigger immediately (price too low)' };
-                }
-                if (tp1Price >= currentPrice || tp2Price >= currentPrice || tp3Price >= currentPrice) {
-                    return { valid: false, error: 'Take Profit would trigger immediately (price too high)' };
-                }
+                if (slPrice  <= currentPrice) return { valid: false, error: 'SL would trigger immediately (SL <= current price)' };
+                if (tp1Price >= currentPrice) return { valid: false, error: 'TP would trigger immediately (TP >= current price)' };
             }
 
             return { valid: true };
@@ -393,89 +415,38 @@ class TradeExecutor {
         }
     }
 
-    /**
-     * Set SL/TP with retry mechanism (3 attempts)
-     */
     async setStopLossAndTakeProfitsWithRetry(symbol, side, entryPrice, quantity, tpSlConfig, symbolInfo, maxRetries = 3) {
-        for (let attempt = 1; attempt <=maxRetries; attempt++) {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
             try {
                 this.logger.info(`🔄 Attempt ${attempt}/${maxRetries} to set SL/TP for ${symbol}`);
                 await this.setStopLossAndTakeProfits(symbol, side, entryPrice, quantity, tpSlConfig, symbolInfo);
-                return true; // Success!
+                return true;
             } catch (error) {
                 this.logger.error(`❌ Attempt ${attempt} failed: ${error.message}`);
-                
                 if (attempt < maxRetries) {
-                    // Wait 1 second before retry
-                    this.logger.info(`⏳ Waiting 1s before retry...`);
                     await new Promise(resolve => setTimeout(resolve, 1000));
                 } else {
                     this.logger.error(`🚨 All ${maxRetries} attempts failed to set SL/TP`);
-                    return false; // All retries failed
+                    return false;
                 }
             }
         }
         return false;
     }
 
-    /**
-     * Validate SL/TP prices are in correct direction
-     */
-    validateSLTP(side, entryPrice, sl, tp1, tp2, tp3) {
+    validateSLTP(side, entryPrice, sl, tp1) {
         const isLong = side === 'LONG';
         const errors = [];
 
-        // Validate Stop Loss
         if (isLong) {
-            if (sl >= entryPrice) {
-                errors.push(`LONG Stop Loss (${sl}) must be BELOW entry price (${entryPrice})`);
-            }
+            if (sl  >= entryPrice) errors.push(`LONG SL (${sl}) must be BELOW entry (${entryPrice})`);
+            if (tp1 <= entryPrice) errors.push(`LONG TP (${tp1}) must be ABOVE entry (${entryPrice})`);
         } else {
-            if (sl <= entryPrice) {
-                errors.push(`SHORT Stop Loss (${sl}) must be ABOVE entry price (${entryPrice})`);
-            }
+            if (sl  <= entryPrice) errors.push(`SHORT SL (${sl}) must be ABOVE entry (${entryPrice})`);
+            if (tp1 >= entryPrice) errors.push(`SHORT TP (${tp1}) must be BELOW entry (${entryPrice})`);
         }
 
-        // Validate Take Profits
-        if (isLong) {
-            if (tp1 <= entryPrice) {
-                errors.push(`LONG TP1 (${tp1}) must be ABOVE entry price (${entryPrice})`);
-            }
-            if (tp2 <= entryPrice) {
-                errors.push(`LONG TP2 (${tp2}) must be ABOVE entry price (${entryPrice})`);
-            }
-            if (tp3 <= entryPrice) {
-                errors.push(`LONG TP3 (${tp3}) must be ABOVE entry price (${entryPrice})`);
-            }
-            
-            // Check order: TP1 < TP2 < TP3
-            if (tp1 >= tp2 || tp2 >= tp3) {
-                errors.push(`LONG TPs must be in order: TP1 (${tp1}) < TP2 (${tp2}) < TP3 (${tp3})`);
-            }
-        } else {
-            if (tp1 >= entryPrice) {
-                errors.push(`SHORT TP1 (${tp1}) must be BELOW entry price (${entryPrice})`);
-            }
-            if (tp2 >= entryPrice) {
-                errors.push(`SHORT TP2 (${tp2}) must be BELOW entry price (${entryPrice})`);
-            }
-            if (tp3 >= entryPrice) {
-                errors.push(`SHORT TP3 (${tp3}) must be BELOW entry price (${entryPrice})`);
-            }
-            
-            // Check order: TP1 > TP2 > TP3
-            if (tp1 <= tp2 || tp2 <= tp3) {
-                errors.push(`SHORT TPs must be in order: TP1 (${tp1}) > TP2 (${tp2}) > TP3 (${tp3})`);
-            }
-        }
-
-        if (errors.length > 0) {
-            return {
-                valid: false,
-                error: errors.join(' | ')
-            };
-        }
-
+        if (errors.length > 0) return { valid: false, error: errors.join(' | ') };
         return { valid: true };
     }
 }
