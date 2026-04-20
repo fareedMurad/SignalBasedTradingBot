@@ -63,7 +63,7 @@ TP = 75,660 + 150 × 2.67 = 75,660 + 400.5 = 76,060.5
 {
   "symbol":         "BTCUSDT",       // required
   "direction":      "BUY",           // required — "BUY" (long) | "SELL" (short)
-  "leverage":       10,              // required — 1–125
+  "leverage":       10,              // required — 1–150
   "riskMode":       "isolated",      // required — "isolated" | "crossed"
   "marginDollar":   100,             // required — fixed $ margin per trade
 
@@ -134,13 +134,17 @@ Fill ≈ 75,660 | SL = 75,660 − 150 = **75,510** | TP = 75,660 + 150×2.67 = *
 
 ```json
 {
-  "symbol":       "ETHUSDT",
+  "symbol":       "BTCUSDT",
   "direction":    "SELL",
   "leverage":     5,
   "riskMode":     "isolated",
-  "marginDollar": 50,
-  "slPips":       80,
-  "tpPips":       200
+  "marginDollar": 100,
+  "slPips":       100,
+  "tpPips":       300,
+  "rr":           2.67,
+  "ctcEnabled":   true,
+  "ctcTrigger":   0.4,
+  "holdingCandles": 10,
 }
 ```
 
@@ -154,7 +158,7 @@ Fill ≈ 3,000 | SL = 3,000 + 80 = **3,080** | TP = 3,000 − 200 = **2,800**
 |-------|------|----------|-------------|
 | `symbol` | string | ✅ | Binance Futures pair, e.g. `BTCUSDT` |
 | `direction` | string | ✅ | `"BUY"` or `"SELL"` |
-| `leverage` | number | ✅ | 1 to 125 |
+| `leverage` | number | ✅ | 1 to 150 |
 | `riskMode` | string | ✅ | `"isolated"` or `"crossed"` |
 | `marginDollar` | number | ✅ | Fixed dollar margin e.g. `100` |
 | `stopLoss` | number | ✅* | Absolute SL price (*one of stopLoss/slPips required) |

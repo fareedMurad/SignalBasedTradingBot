@@ -269,7 +269,7 @@ app.get('/api/symbol-info/:symbol', async (req, res) => {
             success: true,
             data: {
                 ...symbolInfo,
-                maxLeverage: fullSymbolInfo?.leverage || 125
+                maxLeverage: fullSymbolInfo?.leverage || 150
             }
         });
     } catch (error) {
@@ -342,8 +342,8 @@ app.post('/api/trade', async (req, res) => {
         }
 
         // Validate leverage range
-        if (signal.leverage < 1 || signal.leverage > 125) {
-            return res.status(400).json({ success: false, error: 'Leverage must be between 1 and 125' });
+        if (signal.leverage < 1 || signal.leverage > 150) {
+            return res.status(400).json({ success: false, error: 'Leverage must be between 1 and 150' });
         }
 
         // Validate risk mode
