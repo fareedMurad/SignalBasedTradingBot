@@ -520,6 +520,33 @@
 
     </div><!-- /container -->
 
+    <!-- ── Edit SL/TP Modal ─────────────────────────────────────────── -->
+    <div id="slTpModal" class="sltp-modal-backdrop" style="display:none;">
+        <div class="sltp-modal-card">
+            <div class="sltp-modal-header">
+                <span>✏️ Edit SL / TP</span>
+                <span id="slTpSymbol" style="margin-left:10px;color:#58a6ff;font-weight:700;"></span>
+                <button class="sltp-close-btn" onclick="closeEditSLTPModal()">✕</button>
+            </div>
+            <p class="sltp-hint">Leave a field blank to keep its current value. At least one field is required.</p>
+            <input type="hidden" id="slTpSymbolInput">
+            <div class="sltp-row">
+                <label class="sltp-label">🔴 Stop Loss</label>
+                <input type="number" id="newSLInput" class="sltp-input" placeholder="New SL price" step="any" min="0">
+            </div>
+            <div class="sltp-row">
+                <label class="sltp-label">🟢 Take Profit</label>
+                <input type="number" id="newTPInput" class="sltp-input" placeholder="New TP price" step="any" min="0">
+            </div>
+            <div id="slTpMsg" class="sltp-msg"></div>
+            <div class="sltp-actions">
+                <button class="sltp-cancel-btn" onclick="closeEditSLTPModal()">Cancel</button>
+                <button id="saveSLTPBtn" class="sltp-save-btn" onclick="saveSLTP()">💾 Save</button>
+            </div>
+        </div>
+    </div>
+    <!-- ────────────────────────────────────────────────────────────── -->
+
     <script src="app.js"></script>
 </body>
 

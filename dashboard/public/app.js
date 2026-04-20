@@ -170,8 +170,11 @@ function buildPositionRow(pos) {
             <td>${pos.leverage}x</td>
             <td class="holding-cell">${holding}</td>
             <td>${ctcBadge}</td>
-            <td>
-                <button class="btn btn-danger" onclick="closePosition('${pos.symbol}')">Close</button>
+            <td style="display:flex;flex-direction:column;gap:4px;align-items:flex-start;">
+                <button class="btn btn-sm" style="background:#1565c0;color:#fff;font-size:0.78em;padding:4px 8px;"
+                        onclick="openEditSLTP('${pos.symbol}', ${pos.stopLoss || 0}, ${pos.takeProfit1 || 0})">✏️ Edit SL/TP</button>
+                <button class="btn btn-danger" style="font-size:0.78em;padding:4px 8px;"
+                        onclick="closePosition('${pos.symbol}')">✖ Close</button>
             </td>
         </tr>
     `;
@@ -667,6 +670,86 @@ async function closePosition(symbol) {
         showMessage('error', `❌ Failed: ${error.message}`);
     }
 }
+
+// ─────────────────────────────────────────────
+// EDIT SL / TP MODAL
+// ─────────────────────────────────────────────
+
+/**
+ * Open the Edit SL/TP modal pre-filled with current values.
+ */
+function openEditSLTP(symbol, currentSL, currentTP) {
+    document.getElementById('slTpSymbol').textContent = symbol;
+    document.getElementById('slTpSymbolInput').value  = symbol;
+    document.getElementById('newSLInput').value       = currentSL ? currentSL.toFixed(6) : '';
+    document.getElementById('newTPInput').value       = currentTP ? currentTP.toFixed(6) : '';
+    document.getElementById('slTpMsg').textContent    = '';
+    document.getElementById('slTpModal').style.display = 'flex';
+    // Focus SL field
+    setTimeout(() => document.getElementById('newSLInput').focus(), 50);
+}
+
+function closeEditSLTPModal() {
+    document.getElementById('slTpModal').style.display = 'none';
+}
+
+async function saveSLTP() {
+    const symbol = document.getElementById('slTpSymbolInput').value;
+    const slVal  = document.getElementById('newSLInput').value.trim();
+    const tpVal  = document.getElementById('newTPInput').value.trim();
+    const msgEl  = document.getElementById('slTpMsg');
+
+    if (!slVal && !tpVal) {
+        msgEl.style.color = '#f44336';
+        msgEl.textContent = 'Enter at least one of SL or TP.';
+        return;
+    }
+
+    const body = {};
+    if (slVal) body.stopLoss    = parseFloat(slVal);
+    if (tpVal) body.takeProfit1 = parseFloat(tpVal);
+
+    const saveBtn = document.getElementById('saveSLTPBtn');
+    saveBtn.disabled   = true;
+    saveBtn.textContent = '⏳ Saving…';
+    msgEl.textContent   = '';
+
+    try {
+        const res  = await fetch(`${API_BASE}/positions/${symbol}/sl-tp`, {
+            method:  'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body:    JSON.stringify(body)
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            msgEl.style.color = '#4caf50';
+            msgEl.textContent = `✅ Updated! SL=${data.data.newSL?.toFixed(4) ?? '—'} TP=${data.data.newTP?.toFixed(4) ?? '—'}`;
+            loadPositions();
+            // Auto-close after short delay
+            setTimeout(closeEditSLTPModal, 1500);
+        } else {
+            msgEl.style.color = '#f44336';
+            msgEl.textContent = `❌ ${data.error}`;
+        }
+    } catch (err) {
+        msgEl.style.color = '#f44336';
+        msgEl.textContent = `❌ ${err.message}`;
+    } finally {
+        saveBtn.disabled   = false;
+        saveBtn.textContent = '💾 Save';
+    }
+}
+
+// Close modal on backdrop click
+document.addEventListener('DOMContentLoaded', () => {
+    const modal = document.getElementById('slTpModal');
+    if (modal) {
+        modal.addEventListener('click', (e) => {
+            if (e.target === modal) closeEditSLTPModal();
+        });
+    }
+});
 
 // ─────────────────────────────────────────────
 // MESSAGES

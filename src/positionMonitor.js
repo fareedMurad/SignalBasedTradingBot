@@ -147,6 +147,165 @@ class PositionMonitor {
     //  Holding toggle
     // ─────────────────────────────────────────────────────────────────────────
 
+    // ─────────────────────────────────────────────────────────────────────────
+    //  SL/TP manual edit
+    // ─────────────────────────────────────────────────────────────────────────
+
+    /**
+     * Update SL and/or TP for an active monitored position.
+     *
+     * History policy:
+     *   - Original stopLoss / takeProfit1 on the trade record are NEVER overwritten.
+     *   - Each adjustment is appended to trade.slTpAdjustments[] with full audit log.
+     *   - trade.currentSL / trade.currentTP reflect the latest active levels.
+     *
+     * Behaviour:
+     *   - Software SL/TP (testnet): updates in-memory only; exchange orders not touched.
+     *   - Live mode: cancels old STOP_MARKET / TAKE_PROFIT_MARKET, places new ones.
+     *   - CTC trigger price is recomputed from the new TP.
+     *
+     * @param {string}  symbol
+     * @param {number|null} newSL  - new stop loss price  (null = keep current)
+     * @param {number|null} newTP  - new take profit price (null = keep current)
+     * @returns {object} { success, symbol, previousSL, previousTP, newSL, newTP }
+     */
+    async updateSLTP(symbol, newSL, newTP) {
+        const positionData = this.monitoredPositions.get(symbol);
+        if (!positionData) {
+            return { success: false, error: `Position ${symbol} not found in monitor` };
+        }
+
+        const previousSL = positionData.stopLoss;
+        const previousTP = positionData.takeProfit1;
+        const resolvedSL = newSL ?? previousSL;
+        const resolvedTP = newTP ?? previousTP;
+        const isLong     = positionData.side === 'LONG';
+
+        // ── Basic directional validation ─────────────────────────────────────
+        if (resolvedSL && resolvedTP) {
+            if (isLong && resolvedSL >= resolvedTP) {
+                return { success: false, error: `LONG: SL (${resolvedSL}) must be below TP (${resolvedTP})` };
+            }
+            if (!isLong && resolvedSL <= resolvedTP) {
+                return { success: false, error: `SHORT: SL (${resolvedSL}) must be above TP (${resolvedTP})` };
+            }
+        }
+
+        // ── Live mode: replace exchange orders ───────────────────────────────
+        const isTestnet = this.client.isTestnet();
+        if (!isTestnet && !positionData.softwareSLTP) {
+            try {
+                const symbolInfo = await this.client.getSymbolInfo(symbol);
+                const positions  = await this.client.getPositions(symbol);
+                const position   = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
+                if (!position) return { success: false, error: 'Position no longer open on exchange' };
+
+                const qty = Math.abs(parseFloat(position.positionAmt));
+
+                // Cancel existing SL and TP orders
+                const openOrders = await this.client.getOpenOrders(symbol);
+                for (const order of openOrders) {
+                    if (order.type === 'STOP_MARKET' || order.type === 'TAKE_PROFIT_MARKET') {
+                        try {
+                            await this.client.cancelOrder(symbol, order.orderId);
+                            this.logger.info(`🗑️ Cancelled ${order.type} @ ${order.stopPrice} for ${symbol}`);
+                        } catch (e) {
+                            this.logger.warn(`Could not cancel order ${order.orderId}: ${e.message}`);
+                        }
+                    }
+                }
+
+                // Place new SL
+                if (resolvedSL) {
+                    const slPrice = this.executor.roundToTickSize(resolvedSL, symbolInfo.tickSize, symbolInfo.pricePrecision);
+                    await this.client.placeOrder({
+                        symbol,
+                        side:        isLong ? 'SELL' : 'BUY',
+                        type:        'STOP_MARKET',
+                        quantity:    qty.toString(),
+                        stopPrice:   slPrice.toString(),
+                        reduceOnly:  'true',
+                        workingType: 'MARK_PRICE'
+                    });
+                    this.logger.info(`✅ New SL placed at ${slPrice} for ${symbol}`);
+                }
+
+                // Place new TP
+                if (resolvedTP) {
+                    const tpPrice = this.executor.roundToTickSize(resolvedTP, symbolInfo.tickSize, symbolInfo.pricePrecision);
+                    await this.client.placeOrder({
+                        symbol,
+                        side:        isLong ? 'SELL' : 'BUY',
+                        type:        'TAKE_PROFIT_MARKET',
+                        quantity:    qty.toString(),
+                        stopPrice:   tpPrice.toString(),
+                        reduceOnly:  'true',
+                        workingType: 'MARK_PRICE'
+                    });
+                    this.logger.info(`✅ New TP placed at ${tpPrice} for ${symbol}`);
+                }
+
+            } catch (err) {
+                this.logger.error(`❌ Failed to update exchange SL/TP for ${symbol}:`, err.message);
+                return { success: false, error: err.message };
+            }
+        } else {
+            this.logger.info(`🧪 ${isTestnet ? 'Testnet' : 'Software'}: SL/TP updated in-memory only for ${symbol}`);
+        }
+
+        // ── Update in-memory monitor data ────────────────────────────────────
+        positionData.stopLoss    = resolvedSL;
+        positionData.takeProfit1 = resolvedTP;
+        positionData.tpHit       = false; // reset TP hit flag when TP is changed
+
+        // Recompute CTC trigger price from new TP
+        if (positionData.ctcEnabled && resolvedTP && positionData.entryPrice) {
+            positionData.ctcTriggerPrice = isLong
+                ? positionData.entryPrice + positionData.ctcTrigger * (resolvedTP - positionData.entryPrice)
+                : positionData.entryPrice - positionData.ctcTrigger * (positionData.entryPrice - resolvedTP);
+            positionData.ctcTriggered = false; // reset CTC if new TP set
+            this.logger.info(`📐 CTC trigger recomputed: ${positionData.ctcTriggerPrice?.toFixed(4)}`);
+        }
+
+        this.monitoredPositions.set(symbol, positionData);
+        this.logger.info(`✏️ SL/TP updated for ${symbol}: SL ${previousSL} → ${resolvedSL} | TP ${previousTP} → ${resolvedTP}`);
+
+        // ── Append audit log to trade record (NEVER overwrite original) ───────
+        try {
+            const trades    = await this.storage.getAllTrades();
+            const openTrade = trades.find(t => t.symbol === symbol && t.status === 'open');
+            if (openTrade) {
+                const adjustment = {
+                    timestamp:  Date.now(),
+                    previousSL: previousSL ?? null,
+                    previousTP: previousTP ?? null,
+                    newSL:      resolvedSL,
+                    newTP:      resolvedTP,
+                    reason:     'manual-adjustment'
+                };
+                const existingAdjustments = openTrade.slTpAdjustments || [];
+                await this.storage.updateTrade(openTrade.id, {
+                    // currentSL / currentTP track the live levels; original stopLoss / takeProfit1 UNTOUCHED
+                    currentSL:         resolvedSL,
+                    currentTP:         resolvedTP,
+                    slTpAdjustments:   [...existingAdjustments, adjustment]
+                });
+                this.logger.info(`📝 Adjustment logged to trade ${openTrade.id}`);
+            }
+        } catch (err) {
+            this.logger.error(`Failed to log SL/TP adjustment for ${symbol}:`, err.message);
+        }
+
+        return {
+            success:    true,
+            symbol,
+            previousSL,
+            previousTP,
+            newSL:      resolvedSL,
+            newTP:      resolvedTP
+        };
+    }
+
     async setPositionHolding(symbol, enabled) {
         const positionData = this.monitoredPositions.get(symbol);
         if (!positionData) return false;

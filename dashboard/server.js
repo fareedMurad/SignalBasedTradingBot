@@ -673,6 +673,66 @@ app.post('/api/update-ctc/:symbol', async (req, res) => {
 });
 
 /**
+ * ─────────────────────────────────────────────
+ * EDIT SL / TP for an active position
+ * ─────────────────────────────────────────────
+ *
+ * Body: { stopLoss?: number, takeProfit1?: number }
+ *   - At least one of stopLoss / takeProfit1 must be provided.
+ *   - Omit a field to keep it unchanged.
+ *
+ * History policy:
+ *   - Original trade.stopLoss / trade.takeProfit1 are NEVER overwritten.
+ *   - Adjustment is appended to trade.slTpAdjustments[].
+ *   - trade.currentSL / trade.currentTP reflect the live levels.
+ */
+app.post('/api/positions/:symbol/sl-tp', async (req, res) => {
+    try {
+        const { symbol } = req.params;
+        const { stopLoss, takeProfit1 } = req.body;
+
+        if (stopLoss === undefined && takeProfit1 === undefined) {
+            return res.status(400).json({
+                success: false,
+                error: 'Provide at least one of: stopLoss, takeProfit1'
+            });
+        }
+
+        const newSL = stopLoss   !== undefined ? parseFloat(stopLoss)   : null;
+        const newTP = takeProfit1 !== undefined ? parseFloat(takeProfit1) : null;
+
+        if (newSL !== null && isNaN(newSL)) {
+            return res.status(400).json({ success: false, error: 'stopLoss must be a valid number' });
+        }
+        if (newTP !== null && isNaN(newTP)) {
+            return res.status(400).json({ success: false, error: 'takeProfit1 must be a valid number' });
+        }
+        if (newSL !== null && newSL <= 0) {
+            return res.status(400).json({ success: false, error: 'stopLoss must be > 0' });
+        }
+        if (newTP !== null && newTP <= 0) {
+            return res.status(400).json({ success: false, error: 'takeProfit1 must be > 0' });
+        }
+
+        const result = await monitor.updateSLTP(symbol, newSL, newTP);
+
+        if (result.success) {
+            logger.info(`✏️ SL/TP updated for ${symbol}: SL=${result.newSL} TP=${result.newTP}`);
+            res.json({
+                success: true,
+                message: `SL/TP updated for ${symbol}`,
+                data: result
+            });
+        } else {
+            res.status(400).json({ success: false, error: result.error });
+        }
+    } catch (error) {
+        logger.error(`Error updating SL/TP for ${req.params.symbol}:`, error.message);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
  * Get statistics
  */
 app.get('/api/statistics', async (req, res) => {
