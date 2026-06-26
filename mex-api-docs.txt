@@ -1,0 +1,3087 @@
+Account and Trading Endpoints
+The API endpoint under the [Account and trading endpoints] module requires authentication.
+
+Get All Account Assets
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": [
+    {
+      "currency": "USDT",
+      "positionMargin": 0,
+      "availableBalance": 32.80984793658,
+      "cashBalance": 32.80984793,
+      "frozenBalance": 0,
+      "equity": 32.80984793,
+      "unrealized": 0,
+      "bonus": 0,
+      "availableCash": 32.80984793658,
+      "availableOpen": 32.80984793658,
+      "debtAmount": 0,
+      "contributeMarginAmount": 0,
+      "vcoinId": "128f589271cb4951b03e71e6323eb7be"
+    }
+  ]
+}
+
+GET /api/v1/private/account/assets
+Required Permission: View Account Details
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+None
+
+Response Parameters:
+
+Parameter	Type	Description
+currency	string	Currency
+positionMargin	decimal	Position margin
+frozenBalance	decimal	Frozen balance
+availableBalance	decimal	Currently available balance
+cashBalance	decimal	Withdrawable balance
+equity	decimal	Total equity
+unrealized	decimal	Unrealized PnL
+bonus	decimal	Trial bonus
+bonusExpireTime	long	Trial bonus expiration time (ms)
+availableCash	decimal	Transferable amount
+availableOpen	decimal	Usable amount
+debtAmount	decimal	Debt amount
+contributeMarginAmount	decimal	Contributed effective margin
+vcoinId	string	Currency ID
+Get Single Currency Asset Information
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": {
+    "currency": "MX",
+    "positionMargin": 0,
+    "availableBalance": 0.99647149597724856,
+    "cashBalance": 0.99647149,
+    "frozenBalance": 0,
+    "equity": 0.99647149,
+    "unrealized": 0,
+    "bonus": 0,
+    "availableCash": 0.99647149597724856,
+    "availableOpen": 0.99647149597724856,
+    "debtAmount": 0,
+    "contributeMarginAmount": 0,
+    "vcoinId": "8c1e92655f9a4064808ce03ec1a48d38"
+  }
+}
+
+GET /api/v1/private/account/asset/{currency}
+Required Permission: View Account Details
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+currency	string	true	Currency
+Response Parameters:
+
+Parameter	Type	Description
+currency	string	Currency
+positionMargin	decimal	Position margin
+frozenBalance	decimal	Frozen balance
+availableBalance	decimal	Currently available balance
+cashBalance	decimal	Withdrawable balance
+equity	decimal	Total equity
+unrealized	decimal	Unrealized PnL
+bonus	decimal	Trial bonus
+bonusExpireTime	long	Trial bonus expiration time (ms)
+availableCash	decimal	Transferable amount
+availableOpen	decimal	Usable amount
+debtAmount	decimal	Debt amount
+contributeMarginAmount	decimal	Contributed effective margin
+vcoinId	string	Currency ID
+Get Asset Transfer Records
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": {
+    "pageSize": 20,
+    "totalCount": 1,
+    "totalPage": 1,
+    "currentPage": 1,
+    "resultList": [
+      {
+        "id": 303381159,
+        "txid": "86f334f8850346e89ce4d0ba52b7aa87",
+        "currency": "USDT",
+        "amount": 1,
+        "type": "IN",
+        "state": "SUCCESS",
+        "createTime": 1760537642000,
+        "updateTime": 1760537641000
+      }
+    ]
+  }
+}
+
+GET /api/v1/private/account/transfer_record
+Required Permission: View Account Details
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+currency	string	false	Currency
+state	string	false	Status: WAIT 、SUCCESS 、FAILED
+type	string	false	Type: IN 、OUT
+page_num	int	true	Current page, default 1
+page_size	int	true	Page size, default 20, max 100
+Response Parameters:
+
+Parameter	Type	Description
+pageSize	int	Page size
+totalCount	int	Total count
+totalPage	int	Total pages
+currentPage	int	Current page
+resultList	list	Result set
+id	long	id
+txid	string	Transaction ID
+currency	string	Currency
+amount	decimal	Transfer amount
+type	string	Type: IN 、OUT
+state	string	Status: WAIT 、SUCCESS 、FAILED
+createTime	long	Created time
+updateTime	long	Updated time
+View Personal Profit Rate
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": {
+    "ranking": 0,
+    "profitRate": 0,
+    "statisticTime": 1666612800000
+  }
+}
+
+GET /api/v1/private/account/profit_rate/{type}
+Required Permission: View Account Details
+
+Rate limit: 20 times / 2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+type	int	true	Type: 1 Day; 2 Week
+Response Parameters:
+
+Parameter	Type	Description
+profitRate	decimal	Profit rate
+statisticTime	long	Statistic time (ms)
+Deduction Configuration
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": [
+    {
+      "deductCoin": "MX",
+      "settleCoin": "USDT",
+      "discountRatio": 0.8
+    },
+    {
+      "deductCoin": "MXPOINT",
+      "settleCoin": "USDT",
+      "discountRatio": 1
+    }
+  ]
+}
+
+GET /api/v1/private/account/feeDeductConfigs
+Required Permission: View Account Details
+
+Rate limit: 20 times / 2 seconds
+
+Request Parameters:
+
+None
+
+Response Parameters:
+
+Parameter	Type	Description
+deductCoin	string	Deduction coin
+settleCoin	string	Settlement coin
+discountRatio	decimal	Discount ratio
+Query All Spot Discount Configuration Information
+Response Example
+
+{
+  "success": true,
+  "code": 200,
+  "message": "success",
+  "data": [
+    {
+      "id": 1,
+      "currency": "MX",
+      "state": "ENABLED",
+      "discountConfig": "[{\"day\":1,\"discount\":0.5,\"level\":1,\"volMax\":2147483647,\"volMin\":500}]",
+      "ineffectiveDiscountConfig": "",
+      "operator": "",
+      "createTime": 1699775818000,
+      "updateTime": 1732982217000,
+      "enabled": true
+    }
+  ]
+}
+
+
+GET /api/v1/private/account/config/contractFeeDiscountConfig
+Required Permission: View Account Details
+
+Rate limit: 20 times / 2 seconds
+
+Request Parameters:
+
+None
+
+Response Parameters:
+
+Parameter	Type	Description
+currency	string	Deduction currency
+state	string	Status: ENABLED, DISABLED
+discountConfig	string	Discount configuration, JSON: [{ "level":1, "volMin":0, "volMax":12, "day":7, "discount":0.8 }]
+blackContractIdSet	list	List of contract IDs excluded from discounts
+Query Contract Fee Deduction Details
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": [
+    {
+      "id": 54236193,
+      "orderId": 739132568196170240,
+      "feeCurrency": "USDT",
+      "fee": 0.0906990372,
+      "deductType": 2,
+      "deductFeeCurrency": "USDT",
+      "deductFee": 0.0906990372,
+      "timestamp": 1761893337000
+    },
+    {
+      "id": 52060733,
+      "orderId": 735908917455962624,
+      "feeCurrency": "USDT",
+      "fee": 0.297936756,
+      "deductType": 0,
+      "timestamp": 1761124758000
+    }
+  ]
+}
+
+GET /api/v1/private/order/fee_details
+Required Permission: View Order Details
+
+Rate limit: 20 requests / 2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	true	Contract name
+ids	long	false	Deal ID; up to 20 can be sent in a batch
+start_time	long	false	Start time; if omitted, defaults to current time minus 7 days; max span 90 days(Unix millisecond timestamp)
+end_time	long	false	End time; the span between start and end is 90 days(Unix millisecond timestamp)
+page_num	int	false	Current page number, default 1
+page_size	int	false	Page size, default 20, max 100
+Response Parameters:
+
+Parameter	Type	Description
+id	long	Deal ID
+symbol	string	Contract name
+orderId	long	Order ID
+feeCurrency	string	Fee currency
+fee	decimal	Fee
+deductType	string	Deduction type: 0 = No deduction, 1 = MXPOINT deduction, 2 = Trial bonus deduction
+deductFeeCurrency	string	Deducted fee currency
+deductFee	decimal	Deducted fee
+timestamp	long	Deal time
+Query User Discount Usage
+If spot fee discount exists, spot discount config applies; if there is MX holding for contracts, MX deduction applies
+
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": {
+    "useFeeDiscount": true,
+    "useFeeDeduct": false
+  }
+}
+
+GET /api/v1/private/account/discountType
+Required Permission: View Account Details
+
+Rate limit: 20 times / 2 seconds
+
+Request Parameters:
+
+None
+
+Response Parameters:
+
+Parameter	Type	Description
+useFeeDiscount	boolean	Use spot discount fee rate
+useFeeDeduct	boolean	Use contract deduction fee rate
+30-Day Fee Statistics
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": {
+    "totalFee": 0,
+    "saveFee": 0
+  }
+}
+
+GET /api/v1/private/account/asset_book/order_deal_fee/total
+Required Permission: View Account Details
+
+Rate limit: 20 times / 2 seconds
+
+Request Parameters:
+
+None
+
+Response Parameters:
+
+Parameter	Type	Description
+totalFee	decimal	Total fees (4 decimals), default 0
+saveFee	decimal	Saved fees (4 decimals), default 0
+Fee Details Under a Specific Contract
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": [
+    {
+      "contractId": 10,
+      "symbol": "BTC_USDT",
+      "isMaxLeverage": true,
+      "isZeroFeeRate": true,
+      "maxLeverage": 500,
+      "countryConfigContractMaxLeverage": 0,
+      "takerFeeRate": 0,
+      "makerFeeRate": 0,
+      "feeRateMode": "TIERED",
+      "leverageFeeRates": [],
+      "tieredFeeRates": [
+        {
+          "takerFeeRate": 0,
+          "makerFeeRate": 0,
+          "minTieredDealAmount": 0,
+          "maxTieredDealAmount": 10000000
+        },
+        {
+          "takerFeeRate": 0.0004,
+          "makerFeeRate": 0.0001,
+          "minTieredDealAmount": 10000001
+        }
+      ],
+      "tieredDealAmount": 164,
+      "tieredEffectiveDay": 0,
+      "tieredAppointContract": true,
+      "tieredExcludeContractId": true,
+      "tieredContractIds": [10, 77, 1104],
+      "tieredExcludeZeroFee": false,
+      "statisticType": "FIXED",
+      "fixedStartTime": 1760544000000,
+      "fixedEndTime": 1763049600000,
+      "agentFee": false
+    }
+  ]
+}
+
+GET /api/v1/private/account/contract/fee_rate
+Required Permission: View Account Details
+
+Rate limit: 20 times / 2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	false	Trading pair
+Response Parameters:
+
+Parameter	Type	Description
+isZeroFeeRate	boolean	Zero-fee tag: true = zero-fee; false = not zero-fee
+contractId	int	Contract ID
+symbol	string	Trading pair
+maxLeverage	int	Maximum leverage
+feeRateMode	string	Fee mode: LEVERAGE / NORMAL / TIERED
+takerFeeRate	decimal	Taker fee
+makerFeeRate	decimal	Maker fee
+leverageFeeRates	list	Leverage fee list (present when feeRateMode = LEVERAGE)
+tieredFeeRates	list	Tiered fee list (present when feeRateMode = TIERED)
+tieredDealAmount	decimal	Trading amount
+tieredEffectiveDay	int	Effective days
+tieredAppointContract	boolean	Specify contracts; false: not specified; true: specified
+tieredExcludeContractId	boolean	false: not included; true: included
+tieredContractIds	string	Contract ID list, e.g., [10,11]
+tieredExcludeZeroFee	boolean	Exclude zero-fee trading amount; false: do not exclude; true: exclude
+statisticType	string	Statistic dimension for tiered trading amount: ROLLING / FIXED
+fixedStartTime	long	Start time for FIXED mode
+fixedEndTime	long	End time for FIXED mode
+Zero-Fee Trading Pairs
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": {
+    "contracts": [
+      {
+        "contractId": 10,
+        "ifHotTag": false
+      }
+    ],
+    "hotRecs": []
+  }
+}
+
+GET /api/v1/private/account/contract/zero_fee_rate
+Required Permission: View Order Details
+
+Rate limit: 20 times / 2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	false	Trading pair
+Response Parameters:
+
+Parameter	Type	Description
+contracts	list	Zero-fee trading pairs; e.g., [{"contractId": <id>}]
+Get Historical Positions
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": [
+    {
+      "positionId": 1027177055,
+      "symbol": "BTC_USDT",
+      "positionType": 1,
+      "openType": 1,
+      "state": 3,
+      "holdVol": 0,
+      "frozenVol": 0,
+      "closeVol": 2,
+      "holdAvgPrice": 112449.5,
+      "holdAvgPriceFullyScale": "112449.5",
+      "openAvgPrice": 112449.5,
+      "openAvgPriceFullyScale": "112449.5",
+      "closeAvgPrice": 113572.3,
+      "liquidatePrice": 56314.7,
+      "oim": 0,
+      "im": 0,
+      "holdFee": 0,
+      "realised": 0.2155,
+      "leverage": 2,
+      "createTime": 1757506663000,
+      "updateTime": 1757509217000,
+      "autoAddIm": false,
+      "version": 3,
+      "profitRatio": 0.0191,
+      "newOpenAvgPrice": 112449.5,
+      "newCloseAvgPrice": 113572.3,
+      "closeProfitLoss": 0.2245,
+      "fee": -0.009,
+      "positionShowStatus": "CLOSED",
+      "deductFeeList": [],
+      "totalFee": 0.009,
+      "zeroSaveTotalFeeBinance": 0,
+      "zeroTradeTotalFeeBinance": 0.009
+    },
+    {
+      "positionId": 980739233,
+      "symbol": "BTC_USDT",
+      "positionType": 1,
+      "openType": 1,
+      "state": 3,
+      "holdVol": 0,
+      "frozenVol": 0,
+      "closeVol": 5,
+      "holdAvgPrice": 118272.2,
+      "holdAvgPriceFullyScale": "118272.2",
+      "openAvgPrice": 118272.2,
+      "openAvgPriceFullyScale": "118272.2",
+      "closeAvgPrice": 118669.1,
+      "liquidatePrice": 112474.5,
+      "oim": 0,
+      "im": 0,
+      "holdFee": 0,
+      "realised": 0.1747,
+      "leverage": 20,
+      "createTime": 1754827319000,
+      "updateTime": 1754835661000,
+      "autoAddIm": false,
+      "version": 3,
+      "profitRatio": 0.0586,
+      "newOpenAvgPrice": 118272.2,
+      "newCloseAvgPrice": 118669.1,
+      "closeProfitLoss": 0.1984,
+      "fee": -0.0236,
+      "positionShowStatus": "CLOSED",
+      "deductFeeList": [],
+      "totalFee": 0.0236,
+      "zeroSaveTotalFeeBinance": 0,
+      "zeroTradeTotalFeeBinance": 0.0236
+    }
+  ]
+}
+
+GET /api/v1/private/position/list/history_positions
+Required Permission: View Order Details
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	false	Contract
+type	int	false	Position type, 1 long 2 short
+start_time	long	false	Unix millisecond timestamp
+end_time	long	false	Unix millisecond timestamp
+position_type	int	false	Position type, 1 long 2 short
+page_num	int	true	Current page, default 1
+page_size	int	true	Page size, default 20, max 100
+Response Parameters:
+
+Parameter	Type	Description
+pageSize	int	Page size
+totalCount	int	Total count
+totalPage	int	Total pages
+currentPage	int	Current page
+resultList	list	Result set
+positionId	long	Position id
+symbol	string	Contract
+holdVol	decimal	Position size
+positionType	int	Position type, 1 long 2 short
+openType	int	Open type, 1 isolated 2 cross
+state	int	Position status,1 holding 2 system-held 3 closed
+frozenVol	decimal	Frozen volume
+closeVol	decimal	Closed volume
+holdAvgPrice	decimal	Average position price
+holdAvgPriceFullyScale	decimal	Full precision position price
+closeAvgPrice	decimal	Average closing price
+openAvgPrice	decimal	Average opening price
+openAvgPriceFullyScale	decimal	Full precision opening price
+liquidatePrice	decimal	Liquidation price in isolated mode
+oim	decimal	Original initial margin
+im	decimal	Initial margin, adjustable in isolated mode to tune liquidation price
+holdFee	decimal	Funding fee, positive = received, negative = paid
+realised	decimal	Realized PnL
+leverage	int	Leverage
+marginRatio	decimal	Current position margin ratio
+autoAddIm	boolean	Auto-add initial margin supported
+profitRatio	decimal	Return ratio = realized PnL/initial margin
+newOpenAvgPrice	decimal	Average opening price, differs from original
+newCloseAvgPrice	decimal	Average closing price, differs from original
+closeProfitLoss	decimal	Close PnL (fees excluded)
+fee	decimal	Fees (excluding deductions)
+totalFee	decimal	Accumulated fees
+createTime	date	Created time
+updateTime	date	Updated time
+Get Open Positions
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": [
+    {
+      "positionId": 1109973831,
+      "symbol": "BTC_USDT",
+      "positionType": 1,
+      "openType": 1,
+      "state": 1,
+      "holdVol": 5,
+      "frozenVol": 0,
+      "closeVol": 0,
+      "holdAvgPrice": 109777.5,
+      "holdAvgPriceFullyScale": "109777.5",
+      "openAvgPrice": 109777.5,
+      "openAvgPriceFullyScale": "109777.5",
+      "closeAvgPrice": 0,
+      "liquidatePrice": 55020.5,
+      "oim": 27.444375,
+      "im": 27.444375,
+      "holdFee": 0,
+      "realised": 0,
+      "leverage": 2,
+      "marginRatio": 0.0027,
+      "createTime": 1761887133854,
+      "updateTime": 1761887133854,
+      "autoAddIm": false,
+      "version": 1,
+      "profitRatio": 0,
+      "newOpenAvgPrice": 109777.5,
+      "newCloseAvgPrice": 0,
+      "closeProfitLoss": 0,
+      "fee": 0,
+      "deductFeeList": [],
+      "totalFee": 0,
+      "zeroSaveTotalFeeBinance": 0.0301,
+      "zeroTradeTotalFeeBinance": 0.0301
+    }
+  ]
+}
+
+GET /api/v1/private/position/open_positions
+Required Permission: View Order Details
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	false	Contract
+positionId	long	false	Position ID
+Response Parameters:
+
+Parameter	Type	Description
+positionId	long	Position id
+symbol	string	Contract
+holdVol	decimal	Position size
+positionType	int	Position type, 1 long 2 short
+openType	int	Open type, 1 isolated 2 cross
+state	int	Position status,1 holding 2 system-held 3 closed
+frozenVol	decimal	Frozen volume
+closeVol	decimal	Closed volume
+holdAvgPrice	decimal	Average position price
+holdAvgPriceFullyScale	decimal	Full precision position price
+closeAvgPrice	decimal	Average closing price
+openAvgPrice	decimal	Average opening price
+openAvgPriceFullyScale	decimal	Full precision opening price
+liquidatePrice	decimal	Liquidation price in isolated mode
+oim	decimal	Original initial margin
+adlLevel	int	adl reduction level, range 1-5, null means pending refresh
+im	decimal	Initial margin, adjustable in isolated mode to tune liquidation price
+holdFee	decimal	Funding fee, positive = received, negative = paid
+realised	decimal	Realized PnL
+leverage	int	Leverage
+marginRatio	decimal	Current position margin ratio
+autoAddIm	boolean	Auto-add initial margin supported
+profitRatio	decimal	Return ratio = realized PnL/initial margin
+newOpenAvgPrice	decimal	Average opening price, differs from original
+newCloseAvgPrice	decimal	Average closing price, differs from original
+closeProfitLoss	decimal	Close PnL (fees excluded)
+fee	decimal	Fees (excluding deductions)
+totalFee	decimal	Accumulated fees
+createTime	date	Created time
+updateTime	date	Updated time
+Get Funding Fee Details
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": {
+    "symbol": "BTC_USDT",
+    "fundingRate": -0.000019,
+    "maxFundingRate": 0.0018,
+    "minFundingRate": -0.0018,
+    "collectCycle": 8,
+    "nextSettleTime": 1761897600000,
+    "timestamp": 1761887166142
+  }
+}
+
+GET /api/v1/private/position/funding_records
+Required Permission: View Order Details
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	false	Contract
+position_id	int	false	Position id
+page_num	int	false	Current page, default 1
+page_size	int	false	Page size, default 20, max 100
+position_type	int	false	Position type, 1 long 2 short
+start_time	long	false	Unix millisecond timestamp
+end_time	long	false	Unix millisecond timestamp
+Response Parameters:
+
+Parameter	Type	Description
+pageSize	int	Page size
+totalCount	int	Total count
+totalPage	int	Total pages
+currentPage	int	Current page
+resultList	list	Result set
+id	long	id
+symbol	string	Contract
+positionType	int	1: long, 2: short
+positionValue	decimal	Position value
+funding	decimal	Fee
+rate	decimal	Funding rate
+settleTime	date	Settlement time
+Get Risk Limits
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": {
+    "BTC_USDT": [
+      {
+        "level": 6,
+        "maxVol": 4500000,
+        "mmr": 0.05,
+        "imr": 0.1,
+        "maxLeverage": 500,
+        "symbol": "BTC_USDT",
+        "positionType": 2,
+        "openType": 1,
+        "leverage": 2,
+        "limitBySys": false,
+        "currentMmr": 0.05
+      },
+      {
+        "level": 1,
+        "maxVol": 50000,
+        "mmr": 0.001,
+        "imr": 0.002,
+        "maxLeverage": 500,
+        "symbol": "BTC_USDT",
+        "positionType": 1,
+        "openType": 1,
+        "leverage": 2,
+        "limitBySys": false
+      }
+    ]
+  }
+}
+
+GET /api/v1/private/account/risk_limit
+Required Permission: View Order Details
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	false	Contract, if not provided returns all
+Response Parameters:
+
+Parameter	Type	Description
+symbol	string	Contract
+positionType	int	Position type 1: long，2: short
+level	int	Current liquidation risk level, returns min(leverage risk level, position risk level)
+maxVol	decimal	Maximum position quantity; if contract is configured to limit by position value, it will be converted to the number of contracts based on the current fair price.
+maxLeverage	int	Maximum leverage
+mmr	decimal	Maintenance margin rate for the liquidation risk level; to calculate initial margin, obtain maintenance margin rate via the user’s leverage info interface
+imr	decimal	Initial margin rate for the liquidation risk level
+Get Fee Details
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": {
+    "symbol": "BTC_USDT",
+    "joinDiscount": true,
+    "enjoyDiscount": true,
+    "discountRate": 0.5,
+    "joinDeduct": true,
+    "enjoyDeduct": true,
+    "deductRate": 0.8,
+    "originalMakerFee": 0,
+    "originalTakerFee": 0,
+    "realMakerFee": 0,
+    "realTakerFee": 0,
+    "dealAmount": 0,
+    "walletBalance": 35.10272884,
+    "inviterKyc": "",
+    "level": 9999,
+    "feeType": 1,
+    "agentFee": false,
+    "feeRateMode": "TIERED",
+    "leverageFeeRates": [],
+    "tieredFeeRates": [
+      {
+        "takerFeeRate": 0,
+        "makerFeeRate": 0,
+        "minTieredDealAmount": 0,
+        "maxTieredDealAmount": 10000000,
+        "realTakerFee": 0,
+        "realMakerFee": 0
+      },
+      {
+        "takerFeeRate": 0.0004,
+        "makerFeeRate": 0.0001,
+        "minTieredDealAmount": 10000001,
+        "realTakerFee": 0.0002,
+        "realMakerFee": 0.00005
+      }
+    ],
+    "tieredDealAmount": 54,
+    "tieredEffectiveDay": 0,
+    "tieredAppointContract": true,
+    "tieredExcludeContractId": true,
+    "tieredContractIds": [10, 77, 1104],
+    "tieredExcludeZeroFee": false,
+    "statisticType": "FIXED",
+    "fixedStartTime": 1760544000000,
+    "fixedEndTime": 1763049600000
+  }
+}
+
+GET /api/v1/private/account/tiered_fee_rate/v2
+Required Permission: View Order Details
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	false	Contract; when symbol is provided, query fee rate info under that contract
+Response Parameters:
+
+Parameter	Type	Description
+originalMakerFee	decimal	Original maker fee
+originalTakerFee	decimal	Original taker fee
+joinDiscount	boolean	Participate in discount
+enjoyDiscount	boolean	Enjoy discount true enjoy discount false do not enjoy discount
+joinDeduct	boolean	Participate in deduction
+enjoyDeduct	boolean	Enjoy deduction
+realMakerFee	decimal	Actual maker fee
+realTakerFee	decimal	Actual taker fee
+discountRate	decimal	Discount rate
+deductRate	decimal	Deduction rate
+dealAmount	decimal	Trading volume in the last 30 days
+walletBalance	decimal	Wallet balance of yesterday
+inviterKyc	string	Fee group configuration inviter KYC limit
+feeRateMode	string	Fee mode NORMAL：standard fee LEVERAGE：leverage fee。TIERED：tiered fee
+tieredFeeRates	list	Tiered fee configuration list; has value only when feeRateMode is TIERED
+tieredDealAmount	decimal	Trading amount
+tieredEffectiveDay	int	Effective days
+tieredAppointContract	boolean	Whether to specify contract；false：not specify；true：specify
+tieredExcludeContractId	boolean	false: not include，true: include
+tieredContractIds	string	Contract IDs, e.g. [10,11]
+tieredExcludeZeroFee	boolean	false: do not exclude，true: exclude；whether to exclude 0-fee trading volume
+leverageFeeRates	list	Leverage fee configuration list; has value only when feeRateMode is LEVERAGE
+statisticType	string	Tiered fee trading volume statistic dimension ROLLING rolling FIXED fixed
+fixedStartTime	long	Fixed mode start time (ms)
+fixedEndTime	long	Fixed mode end time (ms)
+Modify Position Margin
+Response Example
+
+{
+  "success": true,
+  "code": 0
+}
+
+POST /api/v1/private/position/change_margin
+Required Permission: Order Placing
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+positionId	long	true	Position id
+amount	decimal	true	Amount
+type	string	true	Type,ADD: increase,SUB: decrease
+Response Parameters:
+
+Common parameters, success: true success, false failure
+
+Enable or Disable Auto-Add Margin
+Response Example
+
+{
+  "success": true,
+  "code": 0
+}
+
+POST /api/v1/private/position/change_auto_add_im
+Required Permission: Order Placing
+
+Rate limit: 20 requests / 2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+positionId	long	true	Position ID
+isEnabled	boolean	true	Whether to enable
+Response Parameters:
+
+Common fields; success: true means success, false means failure
+
+Get Position Leverage Multipliers
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": [
+    {
+      "level": 6,
+      "maxVol": 4500000,
+      "mmr": 0.05,
+      "imr": 0.1,
+      "positionType": 1,
+      "openType": 1,
+      "leverage": 2,
+      "limitBySys": false,
+      "currentMmr": 0.001,
+      "maxLeverageView": 500
+    },
+    {
+      "level": 6,
+      "maxVol": 4500000,
+      "mmr": 0.05,
+      "imr": 0.1,
+      "positionType": 2,
+      "openType": 1,
+      "leverage": 2,
+      "limitBySys": false,
+      "currentMmr": 0.001,
+      "maxLeverageView": 500
+    }
+  ]
+}
+
+GET /api/v1/private/position/leverage
+Required Permission: View Order Details
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	true	Contract name
+Response Parameters:
+
+Parameter	Type	Description
+symbol	string	Contract
+positionType	int	Position type， 1 long 2 short
+openType	int	Open type,1: isolated,2: cross
+leverage	int	Leverage
+maxLeverageView	int	Maximum leverage
+currentMmr	decimal	Maintenance margin rate
+Modify Leverage
+Response Example
+
+{
+  "success": true,
+  "code": 0
+}
+
+POST /api/v1/private/position/change_leverage
+Required Permission: Order Placing
+
+Rate limit: 10 times/10 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+positionId	long	false	Position id, provide when a position exists
+leverage	int	true	Leverage
+openType	int	false	Required when no position exists, open type,1: isolated,2: cross
+symbol	string	false	Required when no position exists, contract name
+positionType	int	false	When no position exists, position type， 1 long 2 short
+leverageMode	int	false	Leverage mode 1: advanced mode 2: simple mode
+marginSelected	boolean	false	Flag for adjusting all contracts’ margin mode - whether selected
+leverageSelected	boolean	false	Flag for adjusting all contracts’ leverage mode - whether selected
+Response Parameters:
+
+Common parameters, success: true success,false failure
+
+Get User Position Mode
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": [
+    {
+      "level": 6,
+      "maxVol": 4500000,
+      "mmr": 0.05,
+      "imr": 0.1,
+      "positionType": 1,
+      "openType": 1,
+      "leverage": 2,
+      "limitBySys": false,
+      "currentMmr": 0.001,
+      "maxLeverageView": 500
+    },
+    {
+      "level": 6,
+      "maxVol": 4500000,
+      "mmr": 0.05,
+      "imr": 0.1,
+      "positionType": 2,
+      "openType": 1,
+      "leverage": 2,
+      "limitBySys": false,
+      "currentMmr": 0.001,
+      "maxLeverageView": 500
+    }
+  ]
+}
+
+GET /api/v1/private/position/position_mode
+Required Permission: View Order Details
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+None
+
+Response Parameters:
+
+Parameter	Type	Description
+positionMode	int	Position mode：1 dual-side 2 one-way
+Modify User Position Mode
+Response Example
+
+{
+  "success": true,
+  "code": 0
+}
+
+POST /api/v1/private/position/change_position_mode
+Required Permission: Order Placing
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+positionMode	int	true	1: dual-side, 2: one-way. To modify the position mode, you must ensure there are no active orders, plan orders, or unfinished positions; otherwise, it cannot be modified. When switching from dual-side to one-way mode, the risk limit level will reset to level 1. To change it, call the interface to modify.
+Response Parameters:
+
+Common parameters, success: true success, false failure
+
+Change Risk Level
+Response Example
+
+{
+  "success": true,
+  "code": 0
+}
+
+- POST /api/v1/private/account/change_risk_level
+
+Required Permission: Order Placing
+
+Rate limit: 20 times / 2 seconds
+
+- Disabled. Calling this returns error code 8817 with message: The risk limit feature has been upgraded. Please check the web page for details.
+
+Place Order
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": {
+    "orderId": "739113577038255616",
+    "ts": 1761888808839
+  }
+}
+
+POST /api/v1/private/order/create
+Required Permission: Order Placing
+
+Rate limit: 4 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	true	Contract
+price	decimal	true	Price
+vol	decimal	true	Quantity
+leverage	int	false	Leverage, must be provided when opening a position
+side	int	true	Order direction 1 open long, 2 close short, 3 open short, 4 close long
+type	int	true	Order type,1: limit,2: Post Only (maker only),3: IOC,4: FOK,5: market
+openType	int	true	Open type,1: isolated,2: cross
+externalOid	string	false	External order id
+positionId	int	false	Position id
+stopLossPrice	decimal	false	Stop-loss price
+takeProfitPrice	decimal	false	Take-profit price
+lossTrend	int	false	Stop-loss price type;1: latest price (default);2: fair price;3: index price
+profitTrend	int	false	Take-profit price type;1: latest price (default);2: fair price;3: index price
+priceProtect	int	false	Conditional order trigger protection: "1","0", default "0" disabled. Required only for plan orders/TP-SL orders
+positionMode	int	false	Position mode, default dual-side; 2: one-way; 1: dual-side
+reduceOnly	boolean	false	Reduce-only, only applicable in one-way mode
+marketCeiling	boolean	false	100% market open
+flashClose	boolean	false	Flash close
+bboTypeNum	int	false	Limit order type - BBO type; 0: not BBO;1: opposite-1;2: opposite-5;3: same-side-1;4: same-side-5;
+stpMode	number	false	Self-trade prevention mode: 0 no action; 1 cancel both taker and maker orders; 2 cancel maker orders only; 3 cancel taker orders only
+Response Parameters:
+
+On success, success = true, data is the order id; on failure, success = false, data = null
+
+Batch Place Order
+Only supported for market maker accounts,and a maximum of 50 orders is allowed.
+
+Response Example
+
+{
+    "success": true,
+    "code": 0,
+    "data": [
+        {
+            "orderId": 768116802038827520,
+            "errorCode": 0
+        },
+        {
+            "orderId": 768116802038352385,
+            "errorCode": 0
+        }
+    ]
+}
+
+POST /api/v1/private/order/submit_batch
+Required Permission: Order Placing
+
+Rate limit: 4 times/2 seconds
+
+Request Parameters: List collection
+
+Parameter	Type	Required	Description
+symbol	string	true	Contract
+price	decimal	true	Price
+vol	decimal	true	Quantity
+leverage	int	false	Leverage, must be provided when opening a position
+side	int	true	Order direction: 1 open long, 2 close short, 3 open short, 4 close long
+type	int	true	Order type, 1: limit, 2: Post Only (maker only), 3: IOC, 4: FOK, 5: market
+openType	int	true	Open type, 1: isolated, 2: cross
+externalOid	string	false	External order id
+positionId	int	false	Position id
+positionMode	int	false	Position mode, default dual-side; 2: one-way; 1: dual-side
+reduceOnly	boolean	false	Reduce-only, only applicable in one-way mode
+marketCeiling	boolean	false	100% market open
+flashClose	boolean	false	Flash close
+stpMode	number	true	Self-trade prevention mode: 0 no action; 1 cancel both taker and maker orders; 2 cancel maker orders only; 3 cancel taker orders only
+Response Parameters:
+
+On success, success = true, data is the order id; on failure, success = false, data = null
+
+Chase Order
+Modify order price to the corresponding one-tick price
+
+Response Example
+
+{
+  "success": true,
+  "code": 0
+}
+
+POST /api/v1/private/order/chase_limit_order
+Required Permission: Order Placing
+
+Rate limit: 4 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+orderId	long	true	Order ID
+Response Parameters:
+
+On success, success = true, data is the order id; on failure, success = false, data = null
+
+Modify Order Price & Quantity
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": "739204819784386560"
+}
+
+POST /api/v1/private/order/change_limit_order
+Required Permission: Order Placing
+
+Rate limit: 4 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+orderId	long	true	Order ID
+price	decimal	true	Price
+vol	decimal	true	Quantity
+Response Parameters:
+
+On success, success = true, data is the order id; on failure, success = false, data = null
+
+Cancel Orders
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": [
+    {
+      "orderId": 101716841474621953,
+      "errorCode": 2040,
+      "errorMsg": "order not exist"
+    },
+    {
+      "orderId": 108885377779302912,
+      "errorCode": 2041,
+      "errorMsg": "order state cannot be cancelled"
+    },
+    {
+      "orderId": 108886241042563584,
+      "errorCode": 0,
+      "errorMsg": "success"
+    }
+  ]
+}
+
+Cancel previously placed unfinished orders, up to 50 orders per request.
+
+POST /api/v1/private/order/cancel
+Required Permission: Order Placing
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+None	List<Long>	true	Order id list, max 50
+Response Parameters:
+
+Common parameters, success: true success, false failure
+
+Batch Cancel by External Order ID
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": [
+    {
+      "orderId": 101716841474621953,
+      "errorCode": 2040,
+      "errorMsg": "order not exist"
+    },
+    {
+      "orderId": 108885377779302912,
+      "errorCode": 2041,
+      "errorMsg": "order state cannot be cancelled"
+    },
+    {
+      "orderId": 108886241042563584,
+      "errorCode": 0,
+      "errorMsg": "success"
+    }
+  ]
+}
+
+POST /api/v1/private/order/batch_cancel_with_external
+Required Permission: Order Placing
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters: list collection; e.g. [{"symbol":"BTC_USDT", "externalOid":"ext_11"}]
+
+Parameter	Type	Required	Description
+symbol	string	true	Trading pair
+externalOid	string	true	External order id
+Response Parameters:
+
+Parameter	Type	Description
+orderId	long	Order ID
+errorCode	int	Error code
+errorMsg	string	Error reason
+Cancel by External Order ID
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": [
+    {
+      "orderId": 101716841474621953,
+      "errorCode": 2040,
+      "errorMsg": "order not exist"
+    },
+    {
+      "orderId": 108885377779302912,
+      "errorCode": 2041,
+      "errorMsg": "order state cannot be cancelled"
+    },
+    {
+      "orderId": 108886241042563584,
+      "errorCode": 0,
+      "errorMsg": "success"
+    }
+  ]
+}
+
+POST /api/v1/private/order/cancel_with_external
+Required Permission: Order Placing
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters: list collection; e.g. [{"symbol":"BTC_USDT", "externalOid":"ext_11"}]
+
+Parameter	Type	Required	Description
+symbol	string	true	Contract
+externalOid	string	true	External order id
+Response Parameters:
+
+Parameter	Type	Description
+orderId	long	Order ID
+errorCode	int	Error code
+errorMsg	string	Error reason
+Cancel All Orders Under a Contract
+Response Example
+
+{
+  "success": true,
+  "code": 0
+}
+
+Cancel all unfinished orders under a specific contract.
+
+POST /api/v1/private/order/cancel_all
+Required Permission: Order Placing
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	true	Contract; If you pass symbol, it will cancel orders under that specific contract only. If you pass an empty string "", it will cancel orders under all contracts
+Response Parameters:
+
+Common parameters, success: true success, false failure
+
+Reverse Open Position
+Response Example
+
+{
+  "success": true,
+  "code": 0
+}
+
+POST /api/v1/private/position/reverse
+Required Permission: Order Placing
+
+Rate limit: 4 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	true	Contract
+positionId	long	true	Position id
+vol	decimal	true	Quantity
+Response Parameters:
+
+Common parameters, success: true success, false failure
+
+Close All
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": []
+}
+
+POST /api/v1/private/position/close_all
+Required Permission: Order Placing
+
+Rate limit: 4 times/2 seconds
+
+Request Parameters:
+
+None
+
+Response Parameters:
+
+Common parameters, success: true success, false failure
+
+Query In-Flight Order Counts
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": {
+    "sumCount": 1,
+    "limitOrderCount": 1,
+    "stopOrderCount": 0,
+    "planOrderCount": 0,
+    "trackOrderCount": 0
+  }
+}
+
+POST /api/v1/private/order/open_order_total_count
+Required Permission: View Order Details
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+orderId	long	true	Order ID
+price	decimal	true	Price
+vol	decimal	true	Quantity
+Response Parameters:
+
+On success, success = true, data is the order id; on failure, success = false, data = null
+
+Get Order by External ID
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": {
+    "orderId": "739106551624717312",
+    "symbol": "BTC_USDT",
+    "positionId": 1109973831,
+    "price": 109777.5,
+    "priceStr": "109777.500000000000000000",
+    "vol": 5,
+    "leverage": 2,
+    "side": 1,
+    "category": 1,
+    "orderType": 5,
+    "dealAvgPrice": 109777.5,
+    "dealAvgPriceStr": "109777.500000000000000000",
+    "dealVol": 5,
+    "orderMargin": 27.444375,
+    "takerFee": 0,
+    "makerFee": 0,
+    "profit": 0,
+    "feeCurrency": "USDT",
+    "openType": 1,
+    "state": 3,
+    "externalOid": "_m_903a9f81cc1148be99ac9ece15981374",
+    "errorCode": 0,
+    "usedMargin": 27.444375,
+    "createTime": 1761887134000,
+    "updateTime": 1761887134000,
+    "positionMode": 1,
+    "version": 2,
+    "showCancelReason": 0,
+    "showProfitRateShare": 0,
+    "bboTypeNum": 0,
+    "totalFee": 0,
+    "zeroSaveTotalFeeBinance": 0,
+    "zeroTradeTotalFeeBinance": 0
+  }
+}
+
+GET /api/v1/private/order/external/{symbol}/{external_oid}
+Required Permission: View Order Details
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	true	Contract
+external_oid	string	true	External order ID
+Response Parameters:
+
+Parameter	Type	Description
+orderId	long	Order id
+symbol	string	Contract
+positionId	long	Position id
+price	decimal	Order price
+vol	decimal	Order quantity
+leverage	long	Leverage
+side	int	Order side 1 open long,2 close short,3 open short,4 close long
+category	int	Order category:1 limit,2 liquidation custody,3 custody close,4 ADL reduction
+dealAvgPrice	decimal	Average deal price
+dealVol	decimal	Deal quantity
+orderMargin	decimal	Order margin
+takerFee	decimal	Taker fee
+makerFee	decimal	Maker fee
+profit	decimal	Close PnL
+feeCurrency	string	Fee currency
+openType	int	Open type,1 isolated,2 cross
+state	int	Order status,1: pending,2 unfilled,3 filled,4 canceled,5 invalid
+externalOid	string	External order ID
+createTime	date	Created time
+updateTime	date	Updated time
+Get Order Information by Order ID
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": {
+    "orderId": "739106551624717312",
+    "symbol": "BTC_USDT",
+    "positionId": 1109973831,
+    "price": 109777.5,
+    "priceStr": "109777.500000000000000000",
+    "vol": 5,
+    "leverage": 2,
+    "side": 1,
+    "category": 1,
+    "orderType": 5,
+    "dealAvgPrice": 109777.5,
+    "dealAvgPriceStr": "109777.500000000000000000",
+    "dealVol": 5,
+    "orderMargin": 27.444375,
+    "takerFee": 0,
+    "makerFee": 0,
+    "profit": 0,
+    "feeCurrency": "USDT",
+    "openType": 1,
+    "state": 3,
+    "externalOid": "_m_903a9f81cc1148be99ac9ece15981374",
+    "errorCode": 0,
+    "usedMargin": 27.444375,
+    "createTime": 1761887134000,
+    "updateTime": 1761887134000,
+    "positionMode": 1,
+    "version": 2,
+    "showCancelReason": 0,
+    "showProfitRateShare": 0,
+    "bboTypeNum": 0,
+    "totalFee": 0,
+    "zeroSaveTotalFeeBinance": 0,
+    "zeroTradeTotalFeeBinance": 0
+  }
+}
+
+GET /api/v1/private/order/get/{orderId}
+Required Permission: View Order Details
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+orderId	string	true	Order ID
+Response Parameters:
+
+Parameter	Type	Description
+orderId	long	Order ID
+symbol	string	Contract
+positionId	long	Position id
+price	decimal	Order price
+vol	decimal	Order quantity
+leverage	long	Leverage
+side	int	Order side 1: open long,2: close short,3: open short,4: close long
+category	int	Order category:1: limit,2: liquidation custody,3: custody close,4: ADL reduction
+dealAvgPrice	decimal	Average deal price
+dealVol	decimal	Deal quantity
+orderMargin	decimal	Order margin
+takerFee	decimal	Taker fee
+makerFee	decimal	Maker fee
+profit	decimal	Close PnL
+feeCurrency	string	Fee currency
+openType	int	Open type,1: isolated,2: cross
+state	int	Order status,1: pending,2: unfilled,3: filled,4: canceled,5: invalid
+externalOid	string	External order ID
+createTime	date	Created time
+updateTime	date	Updated time
+bboTypeNum	int	Limit order type - BBO type; 0: not BBO;1: best opposite 1;2: best opposite 5;3: same-side 1;4: same-side 5;
+lossTrend	int	Stop-loss price type;1: latest price;2: fair price;3: index price
+profitTrend	int	Take-profit price type;
+takeProfitPrice	decimal	Take-profit price
+stopLossPrice	decimal	Stop-loss price
+priceProtect	int	Price difference protection 1: on;0: off
+positionMode	int	Position mode;1: dual-side;2: one-way
+Batch Query Orders by Order ID
+Response Example
+
+{
+    "success": true,
+    "code": 0,
+    "data": [
+        {
+            "orderId": "743829153601634818",
+            "symbol": "BTC_USDT",
+            "positionId": 0,
+            "price": 100000,
+            "priceStr": "100000",
+            "vol": 10,
+            "leverage": 20,
+            "side": 1,
+            "category": 1,
+            "orderType": 1,
+            "dealAvgPrice": 0,
+            "dealAvgPriceStr": "0",
+            "dealVol": 0,
+            "orderMargin": 5,
+            "takerFee": 0,
+            "makerFee": 0,
+            "profit": 0,
+            "feeCurrency": "USDT",
+            "openType": 2,
+            "state": 2,
+            "externalOid": "_m_a6e614e4107e4d13893f9f4a3f46d2d8",
+            "errorCode": 0,
+            "usedMargin": 0,
+            "createTime": 1763013089831,
+            "updateTime": 1763013089904,
+            "positionMode": 2,
+            "reduceOnly": false,
+            "version": 1,
+            "showCancelReason": 0,
+            "showProfitRateShare": 0,
+            "bboTypeNum": 0,
+            "totalFee": 0,
+            "zeroSaveTotalFeeBinance": 0,
+            "zeroTradeTotalFeeBinance": 0
+        }
+    ]
+}
+
+GET //api/v1/private/order/batch_query
+Required Permission: View Order Details
+
+Rate limit: 5 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+order_ids	long	true	Array of order IDs, comma-separated, e.g.: order_ids = 1,2,3 (max 50 orders):
+Response Parameters:
+
+Parameter	Type	Description
+orderId	long	Order ID
+symbol	string	Contract
+positionId	long	Position id
+price	decimal	Order price
+vol	decimal	Order quantity
+leverage	long	Leverage
+side	int	Order side 1: open long,2: close short,3: open short,4: close long
+category	int	Order category:1: limit,2: liquidation custody,3: custody close,4: ADL reduction
+dealAvgPrice	decimal	Average deal price
+dealVol	decimal	Deal quantity
+orderMargin	decimal	Order margin
+takerFee	decimal	Taker fee
+makerFee	decimal	Maker fee
+profit	decimal	Close PnL
+feeCurrency	string	Fee currency
+openType	int	Open type,1: isolated,2: cross
+state	int	Order status,1: pending,2: unfilled,3: filled,4: canceled,5: invalid
+externalOid	string	External order ID
+createTime	date	Created time
+updateTime	date	Updated time
+bboTypeNum	int	Limit order type - BBO type; 0: not BBO;1: best opposite 1;2: best opposite 5;3: same-side 1;4: same-side 5;
+lossTrend	int	Stop-loss price type;1: latest price;2: fair price;3: index price
+profitTrend	int	Take-profit price type;
+takeProfitPrice	decimal	Take-profit price
+stopLossPrice	decimal	Stop-loss price
+priceProtect	int	Price difference protection 1: on;0: off
+positionMode	int	Position mode;1: dual-side;2: one-way
+Batch Query Orders by External Order ID
+Response Example
+
+{
+    "success": true,
+    "code": 0,
+    "data": [
+        {
+            "orderId": "743829153601634818",
+            "symbol": "BTC_USDT",
+            "positionId": 0,
+            "price": 100000,
+            "priceStr": "100000",
+            "vol": 10,
+            "leverage": 20,
+            "side": 1,
+            "category": 1,
+            "orderType": 1,
+            "dealAvgPrice": 0,
+            "dealAvgPriceStr": "0",
+            "dealVol": 0,
+            "orderMargin": 5,
+            "takerFee": 0,
+            "makerFee": 0,
+            "profit": 0,
+            "feeCurrency": "USDT",
+            "openType": 2,
+            "state": 2,
+            "externalOid": "_m_a6e614e4107e4d13893f9f4a3f46d2d8",
+            "errorCode": 0,
+            "usedMargin": 0,
+            "createTime": 1763013089831,
+            "updateTime": 1763013089904,
+            "positionMode": 2,
+            "reduceOnly": false,
+            "version": 1,
+            "showCancelReason": 0,
+            "showProfitRateShare": 0,
+            "bboTypeNum": 0,
+            "totalFee": 0,
+            "zeroSaveTotalFeeBinance": 0,
+            "zeroTradeTotalFeeBinance": 0
+        }
+    ]
+}
+
+POST /api/v1/private/order/batch_query_with_external
+Required Permission: View Order Details
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters: list collection
+
+Parameter	Type	Required	Description
+symbol	string	true	Contract
+externalOid	string	true	External order id
+Response Parameters:
+
+Parameter	Type	Description
+orderId	long	Order ID
+symbol	string	Contract
+positionId	long	Position id
+price	decimal	Order price
+vol	decimal	Order quantity
+leverage	long	Leverage
+side	int	Order direction 1: open long,2: close short,3: open short,4: close long
+category	int	Order category:1: limit,2: forced-liquidation custody,3: custody close,4: ADL reduction
+dealAvgPrice	decimal	Average fill price
+dealVol	decimal	Filled quantity
+orderMargin	decimal	Order margin
+takerFee	decimal	Taker fee
+makerFee	decimal	Maker fee
+profit	decimal	Close PnL
+feeCurrency	string	Fee currency
+openType	int	Open type,1: isolated,2: cross
+state	int	Order status,1: pending,2: unfilled,3: filled,4: canceled,5: invalid
+externalOid	string	External order id
+createTime	date	Created time
+updateTime	date	Updated time
+bboTypeNum	int	Limit order type - BBO type; 0: not BBO;1: opposite-1;2: opposite-5;3: same-side-1;4: same-side-5;
+lossTrend	int	Stop-loss price type;1: latest;2: fair;3: index
+profitTrend	int	Take-profit price type;
+takeProfitPrice	decimal	Take-profit price
+stopLossPrice	decimal	Stop-loss price
+priceProtect	int	Spread protection 1: on;0: off
+positionMode	int	Position mode;1: dual-side;2: one-way
+Get Current Orders
+Response Example
+
+{
+    "success": true,
+    "code": 0,
+    "data": [
+        {
+            "orderId": "750330744886358528",
+            "symbol": "ETH_USDT",
+            "positionId": 0,
+            "price": 2500,
+            "priceStr": "2500",
+            "vol": 10,
+            "leverage": 1,
+            "side": 1,
+            "category": 1,
+            "orderType": 1,
+            "dealAvgPrice": 0,
+            "dealAvgPriceStr": "0",
+            "dealVol": 0,
+            "orderMargin": 250,
+            "takerFee": 0,
+            "makerFee": 0,
+            "profit": 0,
+            "feeCurrency": "USDT",
+            "openType": 2,
+            "state": 2,
+            "externalOid": "_m_7dd52a7ebf5e480fb533a5945a2bc184",
+            "errorCode": 0,
+            "usedMargin": 0,
+            "createTime": 1764563189993,
+            "updateTime": 1764563190059,
+            "positionMode": 2,
+            "reduceOnly": false,
+            "version": 1,
+            "showCancelReason": 0,
+            "showProfitRateShare": 0,
+            "bboTypeNum": 0,
+            "totalFee": 0,
+            "zeroSaveTotalFeeBinance": 0,
+            "zeroTradeTotalFeeBinance": 0
+        },
+        {
+            "orderId": "750330663772702720",
+            "symbol": "BTC_USDT",
+            "positionId": 0,
+            "price": 80000,
+            "priceStr": "80000",
+            "vol": 10,
+            "leverage": 1,
+            "side": 1,
+            "category": 1,
+            "orderType": 1,
+            "dealAvgPrice": 0,
+            "dealAvgPriceStr": "0",
+            "dealVol": 0,
+            "orderMargin": 80.016,
+            "takerFee": 0,
+            "makerFee": 0,
+            "profit": 0,
+            "feeCurrency": "USDT",
+            "openType": 2,
+            "state": 2,
+            "externalOid": "_m_4675f4cdfa8a4c608c02da3c2d5dd98f",
+            "errorCode": 0,
+            "usedMargin": 0,
+            "createTime": 1764563170653,
+            "updateTime": 1764563170723,
+            "positionMode": 2,
+            "reduceOnly": false,
+            "version": 1,
+            "showCancelReason": 0,
+            "showProfitRateShare": 0,
+            "bboTypeNum": 0,
+            "totalFee": 0,
+            "zeroSaveTotalFeeBinance": 0,
+            "zeroTradeTotalFeeBinance": 0
+        }
+    ]
+}
+
+GET /api/v1/private/order/list/open_orders
+Required Permission: View Order Details
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+page_num	int	true	Current page, default 1
+page_size	int	true	Page size, default 20, max 100
+Response Parameters:
+
+Parameter	Type	Description
+orderId	string	Order ID
+symbol	string	Contract
+positionId	number	Position ID
+price	number	Order price
+priceStr	string	Order price (string)
+vol	number	Order quantity
+leverage	number	Leverage
+side	number	Order side: 1 open long, 2 close short, 3 open short, 4 close long
+category	number	Order category: 1 limit, 2 liquidation custody, 3 custody close, 4 ADL reduction
+orderType	number	Order type: 1 limit, 2 Post Only, 3 IOC, 4 FOK
+dealAvgPrice	number	Average deal price
+dealAvgPriceStr	string	Average deal price (string)
+dealVol	number	Deal quantity
+orderMargin	number	Order margin
+takerFee	number	Taker fee
+makerFee	number	Maker fee
+profit	number	Close PnL
+feeCurrency	string	Fee currency
+openType	number	Open type: 1 isolated, 2 cross
+state	number	Order status: 1 pending, 2 unfilled, 3 filled, 4 canceled, 5 invalid
+externalOid	string	externalOid starting with CHASE_LIMIT indicates a chase-limit order
+errorCode	number	Error code, 0: normal, 1: parameter error, 2: insufficient balance, 3: position not found, 4: insufficient available position, 5: for long, order price < liquidation price; for short, order price > liquidation price, 6: when opening long, liquidation price > fair price; when opening short, liquidation price < fair price, 7: exceeds risk limit
+usedMargin	number	Used margin
+createTime	number	Unix millisecond timestamp
+updateTime	number	Unix millisecond timestamp
+positionMode	number	Position mode: 1 dual-side; 2 one-way
+reduceOnly	boolean	Reduce-only
+version	number	Data version
+showCancelReason	number	Cancel reason
+showProfitRateShare	number	Show PnL ratio
+bboTypeNum	number	BBO type: 0 not BBO; 1 best opposite 1; 2 best opposite 5; 3 same-side 1; 4 same-side 5
+pnlRate	number	PnL rate
+openAvgPrice	number	Open average price
+zeroSaveTotalFeeBinance	number	Fees saved vs Binance under zero-fee (default 0; contract amount precision)
+zeroTradeTotalFeeBinance	number	Fees that would be paid on Binance under zero-fee (default 0; contract amount precision)
+totalFee	number	Fee (contract amount precision)
+Get All Historical Orders
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": [
+    {
+      "orderId": "739211854408619008",
+      "symbol": "DOGE_USDT",
+      "positionId": 1110417836,
+      "price": 0.18695,
+      "priceStr": "0.186950000000000000",
+      "vol": 1,
+      "leverage": 20,
+      "side": 3,
+      "category": 1,
+      "orderType": 5,
+      "dealAvgPrice": 0.18695,
+      "dealAvgPriceStr": "0.186950000000000000",
+      "dealVol": 1,
+      "orderMargin": 0.93475,
+      "takerFee": 0,
+      "makerFee": 0,
+      "profit": 0,
+      "feeCurrency": "USDT",
+      "openType": 1,
+      "state": 3,
+      "externalOid": "test00002",
+      "errorCode": 0,
+      "usedMargin": 0.93475,
+      "createTime": 1761912240000,
+      "updateTime": 1761912240000,
+      "positionMode": 1,
+      "version": 2,
+      "showCancelReason": 1,
+      "showProfitRateShare": 0,
+      "bboTypeNum": 0,
+      "totalFee": 0,
+      "zeroSaveTotalFeeBinance": 0.0102,
+      "zeroTradeTotalFeeBinance": 0.0102
+    },
+    {
+      "orderId": "739211257974395392",
+      "symbol": "DOGE_USDT",
+      "positionId": 1110417836,
+      "price": 0.18645,
+      "priceStr": "0.186450000000000000",
+      "vol": 1,
+      "leverage": 20,
+      "side": 3,
+      "category": 1,
+      "orderType": 5,
+      "dealAvgPrice": 0.18645,
+      "dealAvgPriceStr": "0.186450000000000000",
+      "dealVol": 1,
+      "orderMargin": 0.93225,
+      "takerFee": 0,
+      "makerFee": 0,
+      "profit": 0,
+      "feeCurrency": "USDT",
+      "openType": 1,
+      "state": 3,
+      "externalOid": "test00001",
+      "errorCode": 0,
+      "usedMargin": 0.93225,
+      "createTime": 1761912098000,
+      "updateTime": 1761912098000,
+      "positionMode": 1,
+      "version": 2,
+      "showCancelReason": 1,
+      "showProfitRateShare": 0,
+      "bboTypeNum": 0,
+      "totalFee": 0,
+      "zeroSaveTotalFeeBinance": 0.0102,
+      "zeroTradeTotalFeeBinance": 0.0102
+    }
+  ]
+}
+
+GET /api/v1/private/order/list/history_orders
+Required Permission: View Order Details
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	false	Contract
+states	string	false	Order status,1: pending,2 unfilled,3 filled,4 canceled,5 invalid; multiple separated by ','
+category	int	false	Order category,1: limit,2: liquidation custody,3: custody close,4: ADL reduction
+start_time	long	false	Unix millisecond timestamp
+end_time	long	false	Unix millisecond timestamp
+page_num	int	true	Current page, default 1
+page_size	int	true	Page size, default 20, max 100
+orderId	long	false	Order ID
+Response Parameters:
+
+Parameter	Type	Description
+pageSize	int	Page size
+totalCount	int	Total count
+totalPage	int	Total pages
+currentPage	int	Current page
+resultList	list	Result set
+orderId	long	Page size
+symbol	string	Contract
+positionId	long	Position id
+price	decimal	Order price
+vol	decimal	Order quantity
+leverage	long	Leverage
+side	int	Order side 1 open long,2 close short,3 open short,4 close long
+category	int	Order category:1 limit,2 liquidation custody,3 custody close,4 ADL reduction
+orderType	int	1: Limit,2: Post Only (maker only),3: Immediate-Or-Cancel,4: Fill-Or-Kill
+dealAvgPrice	decimal	Average deal price
+dealVol	decimal	Deal quantity
+orderMargin	decimal	Order margin
+usedMargin	decimal	Used margin
+takerFee	decimal	Taker fee
+makerFee	decimal	Maker fee
+profit	decimal	Close PnL
+feeCurrency	string	Fee currency
+openType	int	Open type,1 isolated,2 cross
+state	int	Order status,1: pending,2 unfilled,3 filled,4 canceled,5 invalid
+errorCode	int	Error code,0: normal，1: parameter error，2: insufficient balance，3: position not found，4: insufficient available position，5: for long, order price < liquidation price; for short, order price > liquidation price，6: when opening long, liquidation price > fair price; when opening short, liquidation price < fair price
+externalOid	string	External order ID
+createTime	date	Created time
+updateTime	date	Updated time
+bboTypeNum	int	Limit order type - BBO type; 0: not BBO;1: best opposite 1;2: best opposite 5;3: same-side 1;4: same-side 5
+lossTrend	int	Stop-loss price type;1: latest price;2: fair price;3: index price
+profitTrend	int	Take-profit price type;
+takeProfitPrice	decimal	Take-profit price
+stopLossPrice	decimal	Stop-loss price
+priceProtect	int	Price difference protection 1: on;0: off
+positionMode	int	Position mode;1: dual-side;2: one-way
+Note: The price returned by this interface is the platform takeover deal price. To query the liquidation price of a forced liquidation order, use [Get Open Positions]. For orders under forced liquidation, this price is the platform’s takeover price and may differ from the liquidation price. For details, see: Forced Liquidation and Risk Limits
+
+Get Historical Order Deal Details
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": [
+    {
+      "id": "9466823344",
+      "symbol": "DOGE_USDT",
+      "side": 3,
+      "vol": 1,
+      "price": 0.18695,
+      "fee": 0,
+      "feeCurrency": "USDT",
+      "profit": 0,
+      "category": 1,
+      "orderId": "739211854408619008",
+      "timestamp": 1761912240000,
+      "positionMode": 1,
+      "taker": true
+    },
+    {
+      "id": "9466784116",
+      "symbol": "DOGE_USDT",
+      "side": 3,
+      "vol": 1,
+      "price": 0.18645,
+      "fee": 0,
+      "feeCurrency": "USDT",
+      "profit": 0,
+      "category": 1,
+      "orderId": "739211257974395392",
+      "timestamp": 1761912098000,
+      "positionMode": 1,
+      "taker": true
+    }
+  ]
+}
+
+GET /api/v1/private/order/list/order_deals/v3
+Required Permission: View Order Details
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	true	Trading pair
+start_time	long	false	Unix millisecond timestamp
+end_time	long	false	Unix millisecond timestamp
+page_num	int	true	Page number; default 1
+page_size	int	true	Page size; default 20; max cannot exceed 1000
+Response Parameters:
+
+Parameter	Type	Description
+pageSize	int	Page size
+totalCount	int	Total count
+totalPage	int	Total pages
+currentPage	int	Current page
+resultList	list	Result set
+id	long	Deal order id
+symbol	string	Contract
+side	int	Order side 1 open long,2 close short,3 open short,4 close long
+vol	decimal	Deal quantity
+price	decimal	Deal price
+fee	decimal	Fee
+feeCurrency	string	Fee currency
+timestamp	long	Updated time
+Get Trade Records by Order ID
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": [
+    {
+      "id": "159274416",
+      "symbol": "ETH_USDT",
+      "side": 2,
+      "vol": 1,
+      "price": 1208.35,
+      "feeCurrency": "USDT",
+      "fee": 0.0072501,
+      "timestamp": 1609992674000,
+      "profit": 0,
+      "category": 1,
+      "orderId": "102015012431820288",
+      "taker": true
+    }
+  ]
+}
+
+GET /api/v1/private/order/deal_details/{orderId}
+Required Permission: View Order Details
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+orderId	long	true	Order ID
+Response Parameters:
+
+Parameter	Type	Description
+id	long	Trade order ID
+symbol	string	Trading pair
+side	int	Order side;1: open long,2: close short,3: open short,4: close long
+vol	decimal	Deal quantity
+price	decimal	Price
+fee	decimal	Fee; positive means user pays, negative means user receives
+feeCurrency	string	Fee currency
+profit	decimal	Profit
+isTaker	boolean	Whether taker
+category	int	Order category:1 limit,2 liquidation custody,3 custody close,4 ADL reduction
+orderId	long	Order ID
+timestamp	date	Deal time
+Query Historical Orders
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": [
+    {
+      "orderId": "739211854408619008",
+      "symbol": "DOGE_USDT",
+      "positionId": 1110417836,
+      "price": 0.18695,
+      "priceStr": "0.186950000000000000",
+      "vol": 1,
+      "leverage": 20,
+      "side": 3,
+      "category": 1,
+      "orderType": 5,
+      "dealAvgPrice": 0.18695,
+      "dealVol": 1,
+      "orderMargin": 0.93475,
+      "takerFee": 0,
+      "makerFee": 0,
+      "profit": 0,
+      "feeCurrency": "USDT",
+      "openType": 1,
+      "state": 3,
+      "externalOid": "test00002",
+      "errorCode": 0,
+      "usedMargin": 0.93475,
+      "createTime": 1761912240000,
+      "updateTime": 1761912240000,
+      "positionMode": 1,
+      "version": 2,
+      "showCancelReason": 1,
+      "showProfitRateShare": 0,
+      "bboTypeNum": 0,
+      "totalFee": 0,
+      "zeroSaveTotalFeeBinance": 0,
+      "zeroTradeTotalFeeBinance": 0
+    }
+  ]
+}
+
+GET /api/v1/private/order/list/close_orders
+Required Permission: View Order Details
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	true	Trading pair
+start_time	long	false	Unix millisecond timestamp
+end_time	long	false	Unix millisecond timestamp
+page_num	int	false	Page number; default 1
+page_size	int	false	Page size; default 20; max cannot exceed 1000
+Response Parameters:
+
+Parameter	Type	Description
+pageSize	int	Page size
+totalCount	int	Total count
+totalPage	int	Total pages
+currentPage	int	Current page
+orderId	long	Order ID
+symbol	string	Contract
+positionId	long	Position id
+price	decimal	Order price
+vol	decimal	Order quantity
+leverage	long	Leverage
+side	int	Order side;1: open long,2: close short,3: open short,4: close long
+category	int	Order category;1: limit,2: liquidation custody,3: custody close,4: ADL reduction;5: delivery order;6: liquidation hedge
+dealAvgPrice	decimal	Average deal price
+dealVol	decimal	Deal quantity
+orderMargin	decimal	Order margin
+takerFee	decimal	Taker fee
+makerFee	decimal	Maker fee
+profit	decimal	Close PnL
+feeCurrency	string	Fee currency
+openType	int	Open type,1: isolated,2: cross
+state	int	Order status,1: pending,2: unfilled,3: filled,4: canceled,5: invalid
+externalOid	string	External order ID
+createTime	date	Created time
+updateTime	date	Updated time
+bboTypeNum	int	Limit order type - BBO type; 0: not BBO;1: best opposite 1;2: best opposite 5;3: same-side 1;4: same-side 5;
+lossTrend	int	Stop-loss price type;1: latest price;2: fair price;3: index price
+profitTrend	int	Take-profit price type;
+takeProfitPrice	decimal	Take-profit price
+stopLossPrice	decimal	Stop-loss price
+priceProtect	int	Price difference protection 1: on;0: off
+positionMode	int	Position mode;1: dual-side;2: one-way
+Get Plan Order List
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": [
+    {
+      "id": "739114860879304259",
+      "symbol": "DOGE_USD",
+      "leverage": 2,
+      "side": 1,
+      "triggerPrice": 0.00001,
+      "price": 0.00001,
+      "vol": 1,
+      "openType": 1,
+      "triggerType": 2,
+      "state": 1,
+      "executeCycle": 87600,
+      "trend": 1,
+      "orderType": 1,
+      "errorCode": 0,
+      "priceProtect": 0,
+      "createTime": 1761889115000,
+      "updateTime": 1761889115000,
+      "positionMode": 1,
+      "lossTrend": 1,
+      "profitTrend": 1,
+      "reduceOnly": false
+    }
+  ]
+}
+
+GET /api/v1/private/planorder/list/orders
+Required Permission: View Order Details
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	false	Contract
+states	string	false	Status,1: untriggered,2: canceled,3: executed,4: invalidated,5: execution failed; multiple separated by ','
+side	int	false	Order side,1: open long,2: close short,3: open short,4: close long
+start_time	long	true	Unix millisecond timestamp
+end_time	long	true	Unix millisecond timestamp
+page_num	int	true	Current page, default 1
+page_size	int	true	Page size, default 20, max 100
+Response Parameters:
+
+Parameter	Type	Description
+id	int	Order id
+symbol	string	Contract
+leverage	decimal	Leverage
+side	string	Order side, 1 open long,3 open short
+triggerPrice	decimal	Trigger price
+price	decimal	Execution price
+vol	decimal	Order quantity
+openType	int	Open type,1: isolated,2: cross
+triggerType	int	Trigger type,1: greater than or equal,2: less than or equal
+state	int	Status,1: untriggered,2: canceled,3: executed,4: invalidated,5: execution failed
+executeCycle	int	Execution cycle, unit: hours
+trend	int	Trigger price type,1: latest price,2: fair price,3: index price
+errorCode	int	Error code when execution fails, 0: normal
+orderId	long	Order id, returned when execution succeeds
+orderType	int	Order type,1: Limit,2: Post Only (maker only),3: Immediate-Or-Cancel,4: Fill-Or-Kill,5: Market
+createTime	long	Created time
+updateTime	long	Updated time
+priceProtect	int	Price difference protection 1 on 0 off
+positionMode	int	User-set position type Default 0: no record for historical orders 2: one-way 1: dual-side
+lossTrend	int	Stop-loss reference price type 1 latest price 2 fair price 3 index price
+profitTrend	int	Take-profit reference price type 1 latest price 2 fair price 3 index price
+stopLossPrice	decimal	Stop-loss price
+takeProfitPrice	decimal	Take-profit price
+reduceOnly	boolean	Reduce-only
+Response Parameters:
+
+Common parameters, success: true success, false failure
+
+Place Plan Order
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": "739206374277809664"
+}
+
+POST /api/v1/private/planorder/place/v2
+Required Permission: Order Placing
+
+Rate limit: 4 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	true	Contract
+price	decimal	false	Execution price; not required for market
+vol	decimal	true	Quantity
+leverage	int	true	Leverage, required when opening
+side	int	true	1 open long, 2 close short, 3 open short, 4 close long
+openType	int	true	Order direction 1 open long, 2 close short, 3 open short, 4 close long
+triggerPrice	decimal	true	Trigger price
+triggerType	int	true	Trigger type,1: greater than or equal to，2: less than or equal to
+executeCycle	int	true	Execution cycle,1: 24 hours,2: 7 days
+orderType	int	true	Order type,1: limit,2: Post Only (maker only),3: IOC,4: FOK,5: market
+trend	int	true	Trigger price type,1: latest price，2: fair price，3: index price
+priceProtect	int	false	Conditional order trigger protection: "1","0", default "0" disabled. Required only for plan orders/TP-SL orders
+positionMode	int	false	User-set position type default 0: historical orders no record 2: one-way 1: dual-side
+lossTrend	int	false	Stop-loss reference price type 1 latest price 2 fair price 3 index price
+profitTrend	int	false	Take-profit reference price type 1 latest price 2 fair price 3 index price
+stopLossPrice	decimal	false	Stop-loss price
+takeProfitPrice	decimal	false	Take-profit price
+reduceOnly	boolean	false	Reduce-only
+Response Parameters:
+
+On success, success = true, data is the order id; on failure, success = false, data = null
+
+Modify Plan Order
+Response Example
+
+{
+  "success": true,
+  "code": 0
+}
+
+POST /api/v1/private/planorder/change_price
+Required Permission: Order Placing
+
+Rate limit: 4 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	true	Contract
+orderId	long	true	Order ID
+triggerPrice	decimal	true	Trigger price
+price	decimal	true	Execution price
+orderType	int	true	Order type,1: Limit,2: Post Only (maker only),3: Immediate-Or-Cancel,4: Fill-Or-Kill,5: Market
+triggerType	int	true	Trigger type,1: greater than or equal,2: less than or equal
+trend	int	true	Trigger price type,1: latest price,2: fair price,3: index price
+from	int	true	Interface source 1 - modify in trade list 2 - modify in list; empty means price modified via kline drag
+Cancel Planned Orders
+Response Example
+
+{
+  "success": true,
+  "code": 0
+}
+
+POST /api/v1/private/planorder/cancel
+Required Permission: Order Placing
+
+Rate limit: 20 times / 2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+None	List<CancelOrderRequest>	true	List of orders to cancel, up to 50
+CancelOrderRequest:
+
+Example:
+
+[{"symbol":"BTC_USDT","orderId":1},{"symbol":"ETH_USDT","orderId":2}]
+
+Parameter	Type	Required	Description
+symbol	string	true	Contract name
+orderId	string	true	Order ID
+Response Parameters:
+
+Common parameters; success: true for success, false for failure
+
+Cancel All Planned Orders
+Response Example
+
+{
+  "success": true,
+  "code": 0
+}
+
+POST /api/v1/private/planorder/cancel_all
+Required Permission: Order Placing
+
+Rate limit: 20 times / 2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	false	Contract name. If provided, only cancel orders under this contract; if not, cancel orders under all contracts
+Response Parameters:
+
+Common parameters; success: true for success, false for failure
+
+Place TP/SL Order by Position
+Response Example
+
+{
+  "success": false,
+  "code": 0,
+  "message": "",
+  "data": [
+    {
+      "id": 0,
+      "symbol": "",
+      "leverage": 0,
+      "side": 0,
+      "triggerPrice": 0.0,
+      "price": 0.0,
+      "vol": 0.0,
+      "openType": 0,
+      "triggerType": 0,
+      "state": 0,
+      "executeCycle": 0,
+      "trend": 0,
+      "orderType": 0,
+      "orderId": 0,
+      "errorCode": 0,
+      "createTime": "",
+      "updateTime": ""
+    }
+  ]
+}
+
+POST /api/v1/private/stoporder/place
+Required Permission: Order Placing
+
+Rate limit: 5 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+lossTrend	int	true	Stop-loss type: 1 latest price 2 fair price 3 index price
+profitTrend	int	true	Take-profit type: 1 latest price 2 fair price 3 index price
+positionId	long	true	Position id
+vol	decimal	true	Order quantity; must be within the allowed range for the contract; the order quantity plus existing TP/SL order quantity must be less than the closable quantity; position quantity will not be frozen, but checks are required
+stopLossPrice	decimal	false	Stop-loss price; at least one of stop-loss or take-profit must be non-empty and greater than 0
+takeProfitPrice	decimal	false	Take-profit price; at least one of stop-loss or take-profit must be non-empty and greater than 0
+priceProtect	int	false	Trigger protection: "1","0"
+profitLossVolType	string	false	TP/SL quantity type (SAME: same quantity; SEPARATE: different quantities)
+takeProfitVol	decimal	false	Take-profit quantity (when profitLossVolType == SEPARATE)
+stopLossVol	decimal	false	Stop-loss quantity (when profitLossVolType == SEPARATE)
+volType	int	false	Quantity type 1: partial TP/SL 2: position TP/SL
+takeProfitReverse	int	false	Take-profit reverse: 1 yes 2 no
+stopLossReverse	int	false	Stop-loss reverse: 1 yes 2 no
+mtoken	string	false	Web device id
+takeProfitType	int	false	Take-profit type 0 - market TP 1 - limit TP
+takeProfitOrderPrice	decimal	true	Limit TP order price
+stopLossType	long	true	Stop-loss type 0 - market SL 1 - limit SL
+stopLossOrderPrice	decimal	true	Limit SL order price
+Response Parameters:
+
+On success, success = true, data is the order id; on failure, success = false, data = null. If there is a non-final TP/SL order with the same price, the previous id is returned and the previous order quantity is updated asynchronously.
+
+Cancel TP/SL Planned Orders
+Response Example
+
+{
+  "success": true,
+  "code": 0
+}
+
+POST /api/v1/private/stoporder/cancel
+Required Permission: Order Placing
+
+Rate limit: 20 times / 2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+None	List<CancelOrderRequest>	true	List of orders to cancel, up to 50
+CancelOrderRequest:
+
+Example:
+
+[{"stopPlanOrderId":1},{"stopPlanOrderId":2}]
+
+Parameter	Type	Required	Description
+stopPlanOrderId	long	true	TP/SL planned order ID
+Response Parameters:
+
+Common parameters; success: true for success, false for failure
+
+Cancel All TP/SL Planned Orders
+Response Example
+
+{
+  "success": true,
+  "code": 0
+}
+
+POST /api/v1/private/stoporder/cancel_all
+Required Permission: Order Placing
+
+Rate limit: 20 times / 2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+positionId	long	false	Position ID. If provided, cancel only TP/SL orders for this position; if not provided, check symbol
+symbol	string	false	Contract name. If provided, cancel only TP/SL orders under this contract; if not, cancel TP/SL orders under all contracts
+Response Parameters:
+
+Common parameters; success: true for success, false for failure
+
+Modify TP/SL Prices on a Limit Order
+Response Example
+
+{
+  "success": true,
+  "code": 0
+}
+
+POST /api/v1/private/stoporder/change_price
+Required Permission: Order Placing
+
+Rate limit: 4 times / 2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+lossTrend	int	false	Stop-loss price type: 1 Latest Price; 2 Fair Price; 3 Index Price
+profitTrend	int	false	Take-profit price type: 1 Latest Price; 2 Fair Price; 3 Index Price
+orderId	long	true	Limit order ID
+stopLossPrice	decimal	false	Stop-loss price. If both TP and SL are empty or both are 0, the order’s TP/SL will be canceled
+takeProfitPrice	decimal	false	Take-profit price. If both TP and SL are empty or both are 0, the order’s TP/SL will be canceled
+takeProfitReverse	int	false	Reverse on take-profit: 1 Yes; 2 No
+stopLossReverse	int	false	Reverse on stop-loss: 1 Yes; 2 No
+Response Parameters:
+
+Common parameters; success: true for success, false for failure
+
+Modify TP/SL Prices on a TP/SL Planned Order
+Response Example
+
+{
+  "success": true,
+  "code": 0
+}
+
+POST /api/v1/private/stoporder/change_plan_price
+Required Permission: Order Placing
+
+Rate limit: 4 times / 2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+lossTrend	int	false	Stop-loss price type: 1 Latest Price; 2 Fair Price; 3 Index Price
+profitTrend	int	false	Take-profit price type: 1 Latest Price; 2 Fair Price; 3 Index Price
+stopPlanOrderId	long	true	TP/SL planned order ID
+stopLossPrice	decimal	false	Stop-loss price. At least one of TP/SL must be non-empty and greater than 0
+takeProfitPrice	decimal	false	Take-profit price. At least one of TP/SL must be non-empty and greater than 0
+takeProfitReverse	int	false	Reverse on take-profit: 1 Yes; 2 No
+stopLossReverse	int	false	Reverse on stop-loss: 1 Yes; 2 No
+Response Parameters:
+
+Common parameters; success: true for success, false for failure
+
+Modify Take-Profit/Stop-Loss on Plan Order
+Response Example
+
+{
+  "success": true,
+  "code": 0
+}
+
+POST /api/v1/private/planorder/change_stop_order
+Required Permission: Order Placing
+
+Rate limit: 4 times/2 seconds
+
+Special Notes:
+
+When (stopLossPrice != null && stopLossPrice > 0) is met, a stop-loss price is set. The stop-loss trigger price type field (lossTrend) must be provided and must be one of [1, 2, 3], otherwise an error is returned (errorcode: 3001, price type error); When (takeProfitPrice != null && takeProfitPrice > 0) is met, a take-profit price is set. The take-profit trigger price type field (profitTrend) must be provided and must be one of [1, 2, 3], otherwise an error is returned (errorcode: 3001, price type error); When stopLossPrice == null || stopLossPrice == 0, it means the stop-loss setting is canceled; When takeProfitPrice == null || takeProfitPrice == 0, it means the take-profit setting is canceled; When both stopLossPrice and takeProfitPrice are not provided, or both are 0, it means cancel both take-profit and stop-loss settings; lossTrend / profitTrend values: if not provided, default to 1 (latest price); if provided, must be one of [1, 2, 3], otherwise an error is returned (errorcode: 3001, price type error)
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	true	Contract
+orderId	long	true	Order ID
+lossTrend	int	false	Stop-loss reference price type 1 latest price 2 fair price 3 index price
+profitTrend	int	false	Take-profit reference price type 1 latest price 2 fair price 3 index price
+stopLossPrice	decimal	false	Stop-loss price
+takeProfitPrice	decimal	false	Take-profit price
+Response Parameters:
+
+Common parameters, success: true success, false failure
+
+Get Take-Profit/Stop-Loss Order List
+Response Example
+
+{
+  "success": false,
+  "code": 0,
+  "message": "",
+  "data": [
+    {
+      "id": 0,
+      "orderId": 0,
+      "symbol": "",
+      "positionId": 0,
+      "stopLossPrice": 0.0,
+      "takeProfitPrice": 0.0,
+      "state": 0,
+      "triggerSide": 0,
+      "positionType": 0,
+      "vol": 0.0,
+      "realityVol": 0.0,
+      "placeOrderId": 0,
+      "errorCode": 0,
+      "version": 0,
+      "isFinished": 0,
+      "createTime": "",
+      "updateTime": ""
+    }
+  ]
+}
+
+GET /api/v1/private/stoporder/list/orders
+Required Permission: View Order Details
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	false	Contract
+is_finished	int	false	Final-state flag:0: unfinished，1: finished
+state	int	false	Status：1 untriggered 2 canceled 3 executed 4 invalidated 5 execution failed
+type	int	false	Position type,1: long，2: short
+start_time	long	false	Unix millisecond timestamp
+end_time	long	false	Unix millisecond timestamp
+page_num	int	true	Current page, default 1
+page_size	int	true	Page size, default 20, max 100
+Response Parameters:
+
+Parameter	Type	Description
+id	long	TP/SL order id
+symbol	string	Contract
+orderId	long	Limit order id; if placed by position, this value is 0
+positionId	long	Position id
+lossTrend	int	Stop-loss type：1 latest price 2 fair price 3 index price
+profitTrend	int	Take-profit type：1 latest price 2 fair price 3 index price
+stopLossPrice	decimal	Stop-loss price
+takeProfitPrice	decimal	Take-profit price
+state	int	Status,1: untriggered,2: canceled,3: executed,4: invalidated,5: execution failed
+triggerSide	int	Trigger direction，0: not triggered,1: take-profit，2: stop-loss
+positionType	int	Position type,1: long，2: short
+vol	decimal	Order quantity
+realityVol	decimal	Actual placed quantity
+placeOrderId	long	Order id after successful placement
+errorCode	int	Error code,0: normal，others see error code details
+isFinished	int	Whether order is in final state (for query),0: non-final，1: final
+version	int	Version
+priceProtect	int	Trigger protection："1","0"
+profitLossVolType	string	TP/SL quantity type (SAME: same quantity；SEPARATE：different quantities)
+takeProfitVol	decimal	Take-profit quantity (when profitLossVolType == SEPARATE)
+stopLossVol	decimal	Stop-loss quantity (when profitLossVolType == SEPARATE)
+createTime	long	Created time
+updateTime	long	Updated time
+volType	int	Quantity type 1、partial TP/SL 2、position TP/SL
+takeProfitReverse	int	Take-profit reverse: 1 yes 2 no
+stopLossReverse	int	Stop-loss reverse: 1 yes 2 no
+takeProfitType	int	Take-profit type 0 - market TP 1 - limit TP
+takeProfitOrderPrice	decimal	Limit TP order price
+stopLossType	long	Stop-loss type 0 - market SL 1 - limit SL
+stopLossOrderPrice	decimal	Limit SL order price
+Get Current Take-Profit/Stop-Loss Order List
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": [
+    {
+      "id": 357859177,
+      "orderId": "720733527158642176",
+      "symbol": "BTC_USDT",
+      "positionId": "1027177055",
+      "lossTrend": 1,
+      "profitTrend": 1,
+      "stopLossPrice": 111325,
+      "takeProfitPrice": 113573.9,
+      "state": 3,
+      "triggerSide": 2,
+      "positionType": 1,
+      "vol": 2,
+      "realityVol": 2,
+      "placeOrderId": "720744238723187712",
+      "errorCode": 0,
+      "version": 2,
+      "isFinished": 1,
+      "priceProtect": 0,
+      "profitLossVolType": "SEPARATE",
+      "takeProfitVol": 2,
+      "stopLossVol": 2,
+      "createTime": 1757506663000,
+      "updateTime": 1757509217000,
+      "volType": 1,
+      "takeProfitReverse": 2,
+      "stopLossReverse": 2,
+      "closeTryTimes": 0,
+      "reverseTryTimes": 0,
+      "reverseErrorCode": 0,
+      "takeProfitType": 0,
+      "profit_LOSS_VOL_TYPE_SAME": "SAME",
+      "profit_LOSS_VOL_TYPE_DIFFERENT": "SEPARATE"
+    }
+  ]
+}
+
+GET /api/v1/private/stoporder/open_orders
+Required Permission: View Order Details
+
+Rate limit: 20 times/2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	false	Contract
+Response Parameters:
+
+Parameter	Type	Description
+id	long	TP/SL order id
+symbol	string	Contract
+orderId	long	Limit order id; if placed by position, this value is 0
+positionId	long	Position id
+lossTrend	int	Stop-loss type：1 latest price 2 fair price 3 index price
+profitTrend	int	Take-profit type：1 latest price 2 fair price 3 index price
+stopLossPrice	decimal	Stop-loss price
+takeProfitPrice	decimal	Take-profit price
+state	int	Status,1: untriggered,2: canceled,3: executed,4: invalidated,5: execution failed
+triggerSide	int	Trigger direction，0: not triggered,1: take-profit，2: stop-loss
+positionType	int	Position type,1: long，2: short
+vol	decimal	Order quantity
+realityVol	decimal	Actual placed quantity
+placeOrderId	long	Order id after successful placement
+errorCode	int	Error code,0: normal，others see error code details
+isFinished	int	Whether order is in final state (for query),0: non-final，1: final
+version	int	Version
+priceProtect	int	Trigger protection："1","0"
+profitLossVolType	string	TP/SL quantity type (SAME: same quantity；SEPARATE：different quantities)
+takeProfitVol	decimal	Take-profit quantity (when profitLossVolType == SEPARATE)
+stopLossVol	decimal	Stop-loss quantity (when profitLossVolType == SEPARATE)
+createTime	long	Created time
+updateTime	long	Updated time
+volType	int	Quantity type 1、partial TP/SL 2、position TP/SL
+takeProfitReverse	int	Take-profit reverse: 1 yes 2 no
+stopLossReverse	int	Stop-loss reverse: 1 yes 2 no
+takeProfitType	int	Take-profit type 0 - market TP 1 - limit TP
+takeProfitOrderPrice	decimal	Limit TP order price
+stopLossType	long	Stop-loss type 0 - market SL 1 - limit SL
+stopLossOrderPrice	decimal	Limit SL order price
+Place Trailing Order
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": "739218627261666816"
+}
+
+POST /api/v1/private/trackorder/place
+Required Permission: Order Placing
+
+Rate limit: 4 times / 2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	true	Contract name
+leverage	int	true	Leverage
+side	int	true	1 Open Long; 2 Close Short; 3 Open Short; 4 Close Long
+vol	decimal	true	Order quantity
+openType	int	true	Position mode: 1 Isolated; 2 Cross
+trend	int	true	Price type: 1 Latest; 2 Fair; 3 Index
+activePrice	decimal	false	Activation price
+backType	int	true	Callback type: 1 Percentage; 2 Absolute value
+backValue	decimal	true	Callback value
+positionMode	int	true	Position mode. Default 0: no record for historical orders; 1: Two-way (hedged); 2: One-way
+reduceOnly	boolean	false	Reduce-only
+Response Parameters:
+
+Common parameters; success: true for success, false for failure
+
+Cancel Trailing Order
+Response Example
+
+{
+  "success": true,
+  "code": 0
+}
+
+POST /api/v1/private/trackorder/cancel
+Required Permission: Order Placing
+
+Rate limit: 20 times / 2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	false	Contract name
+trackOrderId	int	false	Trailing order ID
+Response Parameters:
+
+Common parameters; success: true for success, false for failure
+
+Modify Trailing Order
+Response Example
+
+{
+  "success": true,
+  "code": 0
+}
+
+POST /api/v1/private/trackorder/change_order
+Required Permission: Order Placing
+
+Rate limit: 4 times / 2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	true	Contract name
+trackOrderId	long	true	Trailing order ID
+trend	int	true	Price type: 1 Latest; 2 Fair; 3 Index
+activePrice	decimal	false	Activation price
+backType	int	true	Callback type: 1 Percentage; 2 Absolute value
+backValue	decimal	true	Callback value
+vol	decimal	true	Order quantity
+Response Parameters:
+
+Common parameters; success: true for success, false for failure
+
+Query Trailing Orders
+Response Example
+
+{
+  "success": true,
+  "code": 0,
+  "data": [
+    {
+      "id": "739628779353703936",
+      "symbol": "DOGE_USDT",
+      "leverage": 2,
+      "side": 1,
+      "vol": 100,
+      "openType": 1,
+      "trend": 1,
+      "activePrice": 0,
+      "markPrice": 0.18657,
+      "backType": 1,
+      "backValue": 0.02,
+      "triggerPrice": 0.1903,
+      "orderId": 0,
+      "errorCode": 0,
+      "state": 1,
+      "createTime": 1762011642623,
+      "updateTime": 1762011642623,
+      "positionMode": 1,
+      "reduceOnly": false,
+      "triggerType": 1
+    }
+  ]
+}
+
+GET /api/v1/private/trackorder/list/orders
+Required Permission: View Order Details
+
+Rate limit: 20 times / 2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+symbol	string	false	Contract name
+states	List<int>	true	Order status: 0 Not activated; 1 Activated; 2 Triggered successfully; 3 Trigger failed; 4 Canceled
+side	int	false	1 Open Long; 2 Close Short; 3 Open Short; 4 Close Long
+start_time	long	false	Unix millisecond timestamp
+end_time	long	false	Unix millisecond timestamp
+pageIndex	int	false	Page index
+pageSize	int	false	Page size
+Response Parameters:
+
+Parameter	Type	Description
+id	long	Order ID
+symbol	string	Contract name
+leverage	int	Leverage
+side	int	1 Open Long; 2 Close Short; 3 Open Short; 4 Close Long
+vol	decimal	Order quantity
+openType	int	Position mode: 1 Isolated; 2 Cross
+trend	int	Price type: 1 Latest; 2 Fair; 3 Index
+activePrice	decimal	Activation price
+markPrice	decimal	Reference price (highest or lowest after activation)
+backType	int	Callback type: 1 Percentage; 2 Absolute value
+backValue	decimal	Callback value
+triggerPrice	decimal	Trigger price (updates with the reference price)
+orderId	decimal	Order ID after trigger success
+errorCode	decimal	Error code when trigger fails
+state	decimal	Current trailing order state (0 Not activated; 1 Activated; 2 Executed successfully; 3 Execution failed; 4 Canceled)
+createTime	long	Create time
+updateTime	long	Update time
+positionMode	int	Position mode. Default 0: no record for historical orders; 1: Two-way; 2: One-way
+reduceOnly	boolean	Reduce-only
+triggerType	int	Trigger condition: 1 ≥; 2 ≤
+Query STP Groups and Group Members
+Only supported for market maker accounts
+
+Response Example
+
+{
+    "success": true,
+    "code": 0,
+    "data": [
+        {
+            "groupName": "stpconfi001",
+            "blackList": [
+                "45359845",
+                "72009483"
+            ],
+            "createTime": 1768804555000,
+            "updateTime": 1768804555000
+        }
+    ]
+}
+
+GET /api/v1/private/market_maker/self_trade/blacklist
+Required Permission: View Order Details
+
+Rate limit: 20 times / 2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+configName	string	false	Blacklist group id
+Response Parameters:
+
+Parameter	Type	Description
+groupName	string	Blacklist group name
+blackList	string	Sub-account UID list
+createTime	date	Create time
+updateTime	date	Update time
+Get Current User STP Group
+Only supported for market maker accounts
+
+Response Example
+
+{
+    "success": true,
+    "code": 0
+}
+
+GET /api/v1/private/market_maker/self_trade/blacklist/search
+Required Permission: View Order Details
+
+Rate limit: 20 times / 2 seconds
+
+Request Parameters:
+None
+
+Response Parameters:
+Common parameters; success: true for success, false for failure
+
+Create STP Group
+Only supported for market maker accounts
+
+Response Example
+
+{
+    "success": true,
+    "code": 0,
+    "data": 1
+}
+
+POST /api/v1/private/market_maker/self_trade/blacklist/create
+Required Permission: Order Placing
+
+Rate limit: 20 times / 2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+configName	string	true	Blacklist group id
+blacklist	number[]	true	Sub-account UID list
+Response Parameters:
+Common parameters; success: true for success, false for failure
+
+Update STP Group
+Only supported for market maker accounts
+
+Response Example
+
+{
+    "success": true,
+    "code": 0
+}
+
+POST /api/v1/private/market_maker/self_trade/blacklist/update
+Required Permission: Order Placing
+
+Rate limit: 20 times / 2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+configName	string	true	Blacklist group id
+blacklist	number[]	true	Sub-account UID list
+Response Parameters:
+Common parameters; success: true for success, false for failure
+
+Delete STP Group
+Only supported for market maker accounts
+
+Response Example
+
+{
+    "success": true,
+    "code": 0
+}
+
+POST /api/v1/private/market_maker/self_trade/blacklist/delete
+Required Permission: Order Placing
+
+Rate limit: 20 times / 2 seconds
+
+Request Parameters:
+
+Parameter	Type	Required	Description
+configName	string	true	Blacklist group id
+Response Parameters:
+Common parameters; success: true for success, false for failure

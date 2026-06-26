@@ -243,6 +243,20 @@ class BinanceClient {
             throw error;
         }
     }
+
+    /**
+     * Get maximum leverage for a symbol.
+     * Used by dashboard /api/symbol-info route — replaces direct futuresExchangeInfo() call.
+     */
+    async getMaxLeverage(symbol) {
+        try {
+            const brackets = await this.client.futuresLeverageBracket({ symbol });
+            return brackets?.[0]?.brackets?.[0]?.initialLeverage ?? 125;
+        } catch (error) {
+            this.logger.error(`Error getting max leverage for ${symbol}:`, error.message);
+            return 125; // safe fallback
+        }
+    }
 }
 
 module.exports = BinanceClient;

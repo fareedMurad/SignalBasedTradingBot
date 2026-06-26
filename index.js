@@ -5,7 +5,7 @@
 
 require('dotenv').config();
 const Logger = require('./src/logger');
-const BinanceClient = require('./src/binanceClient');
+const { createExchangeClient } = require('./src/exchangeClient');
 const TradeExecutor = require('./src/tradeExecutor');
 const PositionMonitor = require('./src/positionMonitor');
 const StorageManager = require('./src/storageManager');
@@ -17,24 +17,32 @@ class SignalTradingBot {
 
         // Configuration
         this.config = {
-            apiKey: process.env.API_KEY,
-            apiSecret: process.env.API_SECRET,
-            useTestnet: process.env.USE_TESTNET === 'true',
-            useDemoEnv: process.env.USE_DEMO_ENV === 'true',
-            leverage: parseInt(process.env.LEVERAGE) || 10,
-            riskMode: process.env.RISK_MODE || 'isolated',
-            minMarginBalance: parseFloat(process.env.MIN_MARGIN_BALANCE) || 50,
-            awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID,
+            // Binance keys (used when EXCHANGE=binance)
+            apiKey    : process.env.API_KEY,
+            apiSecret : process.env.API_SECRET,
+            // MEXC keys (used when EXCHANGE=mexc)
+            mexcApiKey    : process.env.MEXC_API_KEY,
+            mexcApiSecret : process.env.MEXC_API_SECRET,
+            // Trade mode
+            tradeMode  : process.env.TRADE_MODE || (process.env.USE_TESTNET === 'true' ? 'testnet' : 'live'),
+            useTestnet : process.env.USE_TESTNET === 'true',
+            useDemoEnv : process.env.USE_DEMO_ENV === 'true',
+            // Risk / position sizing
+            leverage         : parseInt(process.env.LEVERAGE) || 10,
+            riskMode         : process.env.RISK_MODE || 'isolated',
+            minMarginBalance : parseFloat(process.env.MIN_MARGIN_BALANCE) || 50,
+            // Storage
+            awsAccessKeyId    : process.env.AWS_ACCESS_KEY_ID,
             awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-            awsRegion: process.env.AWS_REGION || 'us-east-1',
-            s3BucketName: process.env.S3_BUCKET_NAME
+            awsRegion         : process.env.AWS_REGION || 'us-east-1',
+            s3BucketName      : process.env.S3_BUCKET_NAME
         };
 
-        // Initialize components
-        this.binanceClient = new BinanceClient(this.config, this.logger);
-        this.storage = new StorageManager(this.config, this.logger);
-        this.executor = new TradeExecutor(this.binanceClient, this.logger, this.config);
-        this.monitor = new PositionMonitor(this.binanceClient, this.executor, this.logger, this.storage);
+        // Initialize exchange client (Binance or MEXC based on EXCHANGE= in .env)
+        this.exchangeClient = createExchangeClient(this.config, this.logger);
+        this.storage  = new StorageManager(this.config, this.logger);
+        this.executor = new TradeExecutor(this.exchangeClient, this.logger, this.config);
+        this.monitor  = new PositionMonitor(this.exchangeClient, this.executor, this.logger, this.storage);
 
         this.isRunning = false;
     }
@@ -47,7 +55,7 @@ class SignalTradingBot {
             this.logger.info('🚀 Starting Signal-Based Trading Bot...');
 
             // Check balance
-            const balance = await this.binanceClient.getBalance();
+            const balance = await this.exchangeClient.getBalance();
             this.logger.info(`💰 Account Balance: $${balance.available.toFixed(2)} USDT`);
 
             if (balance.available < this.config.minMarginBalance) {
@@ -193,8 +201,8 @@ class SignalTradingBot {
      */
     async getStatus() {
         try {
-            const balance = await this.binanceClient.getBalance();
-            const positions = await this.binanceClient.getPositions();
+            const balance = await this.exchangeClient.getBalance();
+            const positions = await this.exchangeClient.getPositions();
             const activePositions = positions.filter(p => parseFloat(p.positionAmt) !== 0);
             const monitorStatus = this.monitor.getStatus();
             const stats = await this.storage.getStatistics();
@@ -235,7 +243,7 @@ class SignalTradingBot {
      */
     async getAvailableSymbols() {
         try {
-            return await this.binanceClient.getAvailableSymbols();
+            return await this.exchangeClient.getAvailableSymbols();
         } catch (error) {
             this.logger.error('Failed to get symbols:', error.message);
             throw error;

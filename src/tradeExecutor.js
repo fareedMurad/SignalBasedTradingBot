@@ -45,9 +45,10 @@ class TradeExecutor {
     computeTPFromRR(entryPrice, stopLoss, rr, side) {
         const slDist = Math.abs(entryPrice - stopLoss);
         const tpDist = slDist * rr;
-        return side === 'LONG'
+        const raw = side === 'LONG'
             ? entryPrice + tpDist
             : entryPrice - tpDist;
+        return parseFloat(raw.toFixed(2));
     }
 
     /**
@@ -213,6 +214,14 @@ class TradeExecutor {
             }
 
             if (quantity < symbolInfo.minQuantity) {
+                if (signal.marginMode === 'dollar' && signal.marginDollar > 0) {
+                    const minMarginNeeded = (symbolInfo.minQuantity * priceForSize) / leverage;
+                    throw new Error(
+                        `marginDollar $${signal.marginDollar} too small for ${symbol} at ${leverage}x. ` +
+                        `Minimum: $${minMarginNeeded.toFixed(2)} ` +
+                        `(min position = ${symbolInfo.minQuantity} units @ $${priceForSize.toFixed(4)} ÷ ${leverage}x leverage)`
+                    );
+                }
                 throw new Error(`Quantity ${quantity} below minimum ${symbolInfo.minQuantity}`);
             }
 
@@ -231,13 +240,22 @@ class TradeExecutor {
             let softwareSLTP = false;
 
             if (orderType === 'MARKET') {
+                // ── Embed estimated SL/TP inside the /order/create call ──────────────
+                // MEXC creates exchange-visible stop order automatically on fill.
+                // This is the ONLY reliable way — /stoporder/place gives error 2015 inconsistently.
+                const embeddedSL = this.roundToTickSize(estSL, symbolInfo.tickSize, symbolInfo.pricePrecision);
+                const embeddedTP = this.roundToTickSize(estTP, symbolInfo.tickSize, symbolInfo.pricePrecision);
+
                 entryOrder = await this.client.placeOrder({
                     symbol,
-                    side: side === 'LONG' ? 'BUY' : 'SELL',
-                    type: 'MARKET',
-                    quantity: quantity.toString()
+                    side           : side === 'LONG' ? 'BUY' : 'SELL',
+                    type           : 'MARKET',
+                    quantity       : quantity.toString(),
+                    leverage       : parseInt(leverage),
+                    stopLossPrice  : embeddedSL,
+                    takeProfitPrice: embeddedTP
                 });
-                this.logger.info(`✅ Market order executed: ${entryOrder.orderId}`);
+                this.logger.info(`✅ Market order executed: ${entryOrder.orderId} | embedded SL=${embeddedSL} TP=${embeddedTP}`);
 
                 await new Promise(resolve => setTimeout(resolve, 500));
                 const fillPrice = await this.getActualEntryPrice(symbol, currentPrice);
@@ -255,10 +273,28 @@ class TradeExecutor {
                 }
 
                 if (this.client.isTestnet()) {
-                    // Testnet blocks STOP_MARKET / TAKE_PROFIT_MARKET (-4120)
-                    // Position is protected by software SL/TP in the position monitor
-                    this.logger.info('🧪 Testnet: skipping exchange SL/TP orders — software SL/TP active');
+                    // Software SL/TP: price-polling every 5s as primary in-process guard
                     softwareSLTP = true;
+                    // Exchange stop order already embedded in /order/create above — visible in MEXC app
+                    // Try to update it with fill-accurate TP via setPositionSLTP (best-effort)
+                    if (typeof this.client.setPositionSLTP === 'function') {
+                        try {
+                            const openPos = await this.client.getPositions(symbol);
+                            const p = openPos.find(x => x.symbol === symbol && parseFloat(x.positionAmt) !== 0);
+                            if (p && p._positionId) {
+                                const roundedSL = this.roundToTickSize(stopLoss,    symbolInfo.tickSize, symbolInfo.pricePrecision);
+                                const roundedTP = this.roundToTickSize(takeProfit1, symbolInfo.tickSize, symbolInfo.pricePrecision);
+                                const updated = await this.client.setPositionSLTP(p._positionId, p._holdVol || 1, roundedSL, roundedTP);
+                                if (updated) {
+                                    this.logger.info(`🔄 Exchange SL/TP updated post-fill: SL=${roundedSL} TP=${roundedTP}`);
+                                } else {
+                                    this.logger.info(`ℹ️ Exchange SL/TP update skipped (embedded values from /order/create still active)`);
+                                }
+                            }
+                        } catch (slTpErr) {
+                            this.logger.info(`ℹ️ Post-fill SL/TP update skipped: ${slTpErr.message} — embedded stop order from /order/create active`);
+                        }
+                    }
                 } else {
                     const slTpSuccess = await this.setStopLossAndTakeProfitsWithRetry(
                         symbol, side, fillPrice, quantity, tpSlConfig, symbolInfo
@@ -276,11 +312,12 @@ class TradeExecutor {
                 const roundedPrice = this.roundToTickSize(limitPrice, symbolInfo.tickSize, symbolInfo.pricePrecision);
                 entryOrder = await this.client.placeOrder({
                     symbol,
-                    side: side === 'LONG' ? 'BUY' : 'SELL',
-                    type: 'LIMIT',
+                    side    : side === 'LONG' ? 'BUY' : 'SELL',
+                    type    : 'LIMIT',
                     quantity: quantity.toString(),
-                    price: roundedPrice.toString(),
-                    timeInForce: 'GTC'
+                    price   : roundedPrice.toString(),
+                    timeInForce: 'GTC',
+                    leverage: parseInt(leverage)
                 });
                 this.logger.info(`✅ Limit order placed at ${roundedPrice}: ${entryOrder.orderId}`);
                 if (this.client.isTestnet()) {

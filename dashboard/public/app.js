@@ -122,6 +122,9 @@ async function loadPositions() {
 }
 
 function buildPositionRow(pos) {
+    // Manual mode — bot hands-off flag
+    const manualMode = pos.manualMode || false;
+
     // Holding candle progress
     const holding = pos.holdingCandles > 0
         ? buildHoldingCell(pos)
@@ -141,9 +144,21 @@ function buildPositionRow(pos) {
         }
     }
 
+    // Manual mode banner (shown in first cell when active)
+    const manualBanner = manualMode
+        ? `<div style="margin-top:4px;background:#b71c1c;color:#fff;font-size:0.72em;padding:2px 6px;border-radius:4px;font-weight:700;letter-spacing:0.5px;">🛑 MANUAL</div>`
+        : '';
+
+    // Stop Monitor button — toggles manualMode on/off
+    const stopMonitorBtn = manualMode
+        ? `<button class="btn btn-sm" style="background:#ff8f00;color:#fff;font-size:0.78em;padding:4px 8px;border:none;border-radius:4px;cursor:pointer;"
+                   onclick="toggleManualMode('${pos.symbol}', false)">🤖 Resume Bot</button>`
+        : `<button class="btn btn-sm" style="background:#37474f;color:#cfd8dc;font-size:0.78em;padding:4px 8px;border:1px solid #546e7a;border-radius:4px;cursor:pointer;"
+                   onclick="toggleManualMode('${pos.symbol}', true)">🛑 Stop Monitor</button>`;
+
     return `
-        <tr>
-            <td><strong>${pos.symbol}</strong></td>
+        <tr style="${manualMode ? 'background:rgba(183,28,28,0.08);border-left:3px solid #b71c1c;' : ''}">
+            <td><strong>${pos.symbol}</strong>${manualBanner}</td>
             <td><span class="side-${pos.side.toLowerCase()}">${pos.side}</span></td>
             <td>
                 <div style="font-size:0.85em;color:#666;">Entry</div>
@@ -159,8 +174,8 @@ function buildPositionRow(pos) {
                 ${pos.takeProfit3 ? pos.takeProfit3.toFixed(4) : '—'}
             </td>
             <td>
-                <div class="${pos.pnl >= 0 ? 'pnl-positive' : 'pnl-negative'}" style="font-weight:700;">$${pos.pnl.toFixed(2)}</div>
-                <div class="${pos.pnlPercent >= 0 ? 'pnl-positive' : 'pnl-negative'}" style="font-size:0.85em;">${pos.pnlPercent}%</div>
+                <div class="${(pos.pnl ?? 0) >= 0 ? 'pnl-positive' : 'pnl-negative'}" style="font-weight:700;">$${(pos.pnl ?? 0).toFixed(2)}</div>
+                <div class="${parseFloat(pos.pnlPercent) >= 0 ? 'pnl-positive' : 'pnl-negative'}" style="font-size:0.85em;">${(pos.pnlPercent === 'NaN' || pos.pnlPercent == null) ? '0.00' : pos.pnlPercent}%</div>
                 <div style="font-size:0.78em;color:#888;">(${pos.leveragedPnlPercent}% lev)</div>
             </td>
             <td style="color:#2196f3;font-weight:600;">
@@ -171,6 +186,7 @@ function buildPositionRow(pos) {
             <td class="holding-cell">${holding}</td>
             <td>${ctcBadge}</td>
             <td style="display:flex;flex-direction:column;gap:4px;align-items:flex-start;">
+                ${stopMonitorBtn}
                 <button class="btn btn-sm" style="background:#1565c0;color:#fff;font-size:0.78em;padding:4px 8px;"
                         onclick="openEditSLTP('${pos.symbol}', ${pos.stopLoss || 0}, ${pos.takeProfit1 || 0})">✏️ Edit SL/TP</button>
                 <button class="btn btn-danger" style="font-size:0.78em;padding:4px 8px;"
@@ -226,7 +242,9 @@ async function loadTrades() {
         const tbody = document.getElementById('tradesBody');
 
         if (data.success && data.data.length > 0) {
-            tbody.innerHTML = data.data.slice(0, 30).map(trade => {
+            // Filter out hidden/cancelled trades (stale test artefacts)
+            const visibleTrades = data.data.filter(t => t.status !== 'cancelled').slice(0, 50);
+            tbody.innerHTML = visibleTrades.map(trade => {
                 const time = new Date(trade.timestamp).toLocaleString();
                 const statusClass = `status-${trade.status}`;
                 const side = trade.side || (trade.signal?.direction === 'BUY' ? 'LONG' : (trade.signal?.direction === 'SELL' ? 'SHORT' : '—'));
@@ -279,6 +297,12 @@ async function loadTrades() {
                     reasonDisplay = `<span style="color:${color};font-size:0.82em;font-weight:600;">${trade.closeReason}</span>`;
                 }
 
+                // Hide button — only show for orphaned "open" trades
+                const hideBtn = trade.status === 'open'
+                    ? `<button onclick="cancelTrade('${trade.id}')" title="Hide this stale trade"
+                              style="background:none;border:1px solid #555;border-radius:4px;color:#aaa;cursor:pointer;font-size:0.8em;padding:2px 7px;">✕ Hide</button>`
+                    : '';
+
                 return `
                     <tr>
                         <td>${time}</td>
@@ -292,11 +316,12 @@ async function loadTrades() {
                         <td>${pnlDisplay}</td>
                         <td><span class="${statusClass}">${trade.status}</span></td>
                         <td>${reasonDisplay}</td>
+                        <td>${hideBtn}</td>
                     </tr>
                 `;
             }).join('');
         } else {
-            tbody.innerHTML = '<tr><td colspan="11" class="loading">No trades yet</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="12" class="loading">No trades yet</td></tr>';
         }
     } catch (error) {
         console.error('Error loading trades:', error);
@@ -651,6 +676,67 @@ async function togglePositionHolding(symbol, enabled) {
 }
 
 // ─────────────────────────────────────────────
+// MANUAL MODE (STOP MONITOR)
+// ─────────────────────────────────────────────
+
+/**
+ * Toggle manual mode for a monitored position.
+ * When enabled=true: bot suspends ALL automated actions (holding-candle close,
+ * CTC break-even, SL guardian). Row turns red with "🛑 MANUAL" badge.
+ * When enabled=false: normal bot behavior resumes immediately.
+ *
+ * @param {string}  symbol
+ * @param {boolean} enabled  true = "Stop Monitor", false = "Resume Bot"
+ */
+async function toggleManualMode(symbol, enabled) {
+    try {
+        const response = await fetch(`${API_BASE}/positions/${symbol}/manual-mode`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled })
+        });
+        const data = await response.json();
+        if (data.success) {
+            if (enabled) {
+                showMessage('success', `🛑 ${symbol} — Stop Monitor ON. Bot is hands-off. Manage the trade directly on MEXC.`);
+            } else {
+                showMessage('success', `🤖 ${symbol} — Bot resumed. All automated actions restored.`);
+            }
+            loadPositions();
+        } else {
+            showMessage('error', `❌ ${data.error}`);
+            loadPositions(); // refresh to revert UI
+        }
+    } catch (error) {
+        showMessage('error', `❌ Failed: ${error.message}`);
+        loadPositions();
+    }
+}
+
+// ─────────────────────────────────────────────
+// CANCEL / HIDE STALE OPEN TRADE
+// ─────────────────────────────────────────────
+/**
+ * Mark a stale "open" trade record as cancelled so it hides from the table.
+ * Does NOT touch any exchange position — purely a record cleanup.
+ */
+async function cancelTrade(id) {
+    if (!id) return;
+    if (!confirm('Hide this trade from history? (No exchange position will be affected)')) return;
+    try {
+        const res  = await fetch(`${API_BASE}/trades/${id}/cancel`, { method: 'PATCH' });
+        const data = await res.json();
+        if (data.success) {
+            loadTrades();
+        } else {
+            alert(`❌ ${data.error}`);
+        }
+    } catch (err) {
+        alert(`❌ ${err.message}`);
+    }
+}
+
+// ─────────────────────────────────────────────
 // CLOSE POSITION
 // ─────────────────────────────────────────────
 async function closePosition(symbol) {
@@ -723,11 +809,10 @@ async function saveSLTP() {
         const data = await res.json();
 
         if (data.success) {
-            msgEl.style.color = '#4caf50';
-            msgEl.textContent = `✅ Updated! SL=${data.data.newSL?.toFixed(4) ?? '—'} TP=${data.data.newTP?.toFixed(4) ?? '—'}`;
+            // Close modal immediately — don't leave it hanging
+            closeEditSLTPModal();
             loadPositions();
-            // Auto-close after short delay
-            setTimeout(closeEditSLTPModal, 1500);
+            showMessage('success', `✅ SL/TP updated! SL=${data.data?.newSL?.toFixed(4) ?? '—'}  TP=${data.data?.newTP?.toFixed(4) ?? '—'}`);
         } else {
             msgEl.style.color = '#f44336';
             msgEl.textContent = `❌ ${data.error}`;
@@ -736,7 +821,7 @@ async function saveSLTP() {
         msgEl.style.color = '#f44336';
         msgEl.textContent = `❌ ${err.message}`;
     } finally {
-        saveBtn.disabled   = false;
+        saveBtn.disabled    = false;
         saveBtn.textContent = '💾 Save';
     }
 }

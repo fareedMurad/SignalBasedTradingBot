@@ -1,3 +1,19 @@
+
+start:
+bash restart-dashboard.sh
+
+lsof -ti:3000
+
+
+pkill -f "dashboard/server.js"
+
+
+```bash
+EC2_IP=98.93.1.239 SSH_KEY=/Users/4star/Downloads/hs_purl_bot.pem bash start-tunnel.sh
+```
+
+
+
 # Signal-Based Trading Bot
 
 A clean, modern signal-based trading bot for Binance Futures with an intuitive admin dashboard. Execute trades based on signals with advanced features like multiple take-profits, stop-loss management, and Close-to-Cost (CTC) functionality.

@@ -17,13 +17,14 @@
     "author": "",
     "license": "ISC",
     "dependencies": {
+        "aws-sdk": "^2.1490.0",
         "binance-api-node": "^0.12.5",
+        "cors": "^2.8.5",
         "dotenv": "^16.0.3",
         "express": "^4.18.2",
-        "cors": "^2.8.5",
-        "aws-sdk": "^2.1490.0",
-        "ws": "^8.14.2",
-        "uuid": "^9.0.1"
+        "puppeteer-core": "^24.43.0",
+        "uuid": "^9.0.1",
+        "ws": "^8.14.2"
     },
     "devDependencies": {
         "nodemon": "^3.0.1"

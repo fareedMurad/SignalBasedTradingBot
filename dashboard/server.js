@@ -10,10 +10,20 @@ const crypto = require('crypto');
 require('dotenv').config();
 
 const Logger = require('../src/logger');
-const BinanceClient = require('../src/binanceClient');
+const { createExchangeClient } = require('../src/exchangeClient');
 const TradeExecutor = require('../src/tradeExecutor');
 const PositionMonitor = require('../src/positionMonitor');
 const StorageManager = require('../src/storageManager');
+
+// ── MEXC Browser Bot — embedded when MEXC_BROWSER_MODE=true ─────────────────
+// Single process, zero extra HTTP hops.  Set in .env:
+//   MEXC_BROWSER_MODE=true
+const MEXC_BROWSER_MODE = process.env.MEXC_BROWSER_MODE === 'true';
+let mexcBot = null;
+if (MEXC_BROWSER_MODE) {
+    const MexcBrowserBot = require('../src/mexcBrowserBot');
+    mexcBot = new MexcBrowserBot();
+}
 
 const app = express();
 const PORT = process.env.DASHBOARD_PORT || 3000;
@@ -34,10 +44,11 @@ function parseCookies(req) {
 }
 
 function requireAuth(req, res, next) {
-    // Always allow: signal provider webhook + login page + login POST + logout
+    // Always allow: signal provider webhook + login page + login POST + logout + ping
     const open = ['/login', '/logout'];
     if (open.includes(req.path)) return next();
     if (req.path === '/api/trade' && req.method === 'POST') return next();
+    if (req.path === '/api/ping') return next();  // ConnectionWarmer keep-alive probe (no auth needed)
 
     const cookies = parseCookies(req);
     if (cookies.dash_session && activeSessions.has(cookies.dash_session)) {
@@ -131,23 +142,32 @@ app.post('/logout', (req, res) => {
 // Initialize bot components
 const logger = new Logger(process.env.LOG_LEVEL || 'info');
 const config = {
-    apiKey: process.env.API_KEY,
-    apiSecret: process.env.API_SECRET,
-    // TRADE_MODE: 'testnet' | 'live'
-    tradeMode: process.env.TRADE_MODE || 'live',
-    leverage: parseInt(process.env.LEVERAGE) || 10,
-    riskMode: process.env.RISK_MODE || 'isolated',
-    minMarginBalance: parseFloat(process.env.MIN_MARGIN_BALANCE) || 50,
-    awsAccessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    // Binance keys (EXCHANGE=binance)
+    apiKey    : process.env.API_KEY,
+    apiSecret : process.env.API_SECRET,
+    // MEXC keys (EXCHANGE=mexc)
+    mexcApiKey    : process.env.MEXC_API_KEY,
+    mexcApiSecret : process.env.MEXC_API_SECRET,
+    // Trade mode
+    tradeMode  : process.env.TRADE_MODE || (process.env.USE_TESTNET === 'true' ? 'testnet' : 'live'),
+    useTestnet : process.env.USE_TESTNET === 'true',
+    useDemoEnv : process.env.USE_DEMO_ENV === 'true',
+    // Risk
+    leverage         : parseInt(process.env.LEVERAGE) || 10,
+    riskMode         : process.env.RISK_MODE || 'isolated',
+    minMarginBalance : parseFloat(process.env.MIN_MARGIN_BALANCE) || 50,
+    // Storage
+    awsAccessKeyId    : process.env.AWS_ACCESS_KEY_ID,
     awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-    awsRegion: process.env.AWS_REGION || 'us-east-1',
-    s3BucketName: process.env.S3_BUCKET_NAME
+    awsRegion         : process.env.AWS_REGION || 'us-east-1',
+    s3BucketName      : process.env.S3_BUCKET_NAME
 };
 
-const binanceClient = new BinanceClient(config, logger);
-const storage = new StorageManager(config, logger);
-const executor = new TradeExecutor(binanceClient, logger, config);
-const monitor = new PositionMonitor(binanceClient, executor, logger, storage);
+// Exchange client — Binance or MEXC based on EXCHANGE= in .env
+const exchangeClient = createExchangeClient(config, logger);
+const storage  = new StorageManager(config, logger);
+const executor = new TradeExecutor(exchangeClient, logger, config);
+const monitor  = new PositionMonitor(exchangeClient, executor, logger, storage);
 
 // Start monitor and restore positions
 async function initializeMonitor() {
@@ -159,7 +179,7 @@ async function initializeMonitor() {
         const openTrades = trades.filter(t => t.status === 'open' && t.signal);
 
         for (const trade of openTrades) {
-            const positions = await binanceClient.getPositions(trade.symbol);
+            const positions = await exchangeClient.getPositions(trade.symbol);
             const position = positions.find(p => p.symbol === trade.symbol && parseFloat(p.positionAmt) !== 0);
 
             if (position) {
@@ -171,14 +191,28 @@ async function initializeMonitor() {
                 }
                 if (!side) side = 'LONG';
 
-                const isSoftware = config.tradeMode === 'testnet' || !!trade.softwareSLTP;
+                // In browser-bot mode softwareSLTP is always false:
+                // MEXC handles TP/SL via its own stop orders — enabling software mode
+                // would fire a REST market close on every TP hit (bad fills, -$37 bleed).
+                const isSoftware = MEXC_BROWSER_MODE
+                    ? false
+                    : (config.tradeMode === 'testnet' || !!trade.softwareSLTP);
+
+                const restoredHoldingCandles = trade.holdingCandles || sig.holdingCandles || 0;
+                // Restore the user's manual holdingEnabled toggle (persisted to S3 when toggled).
+                // Fall back to (holdingCandles > 0) so new trades auto-enable holding.
+                const restoredHoldingEnabled = trade.holdingEnabled !== undefined
+                    ? trade.holdingEnabled
+                    : restoredHoldingCandles > 0;
+
                 monitor.addPosition(trade.symbol, {
                     side,
                     entryPrice:      trade.price || parseFloat(position.entryPrice),
                     orderType:       trade.orderType || 'MARKET',
                     ctcEnabled:      trade.ctcEnabled  || sig.ctcEnabled  || false,
                     ctcTrigger:      trade.ctcTrigger  || sig.ctcTrigger  || 0.5,
-                    holdingCandles:  trade.holdingCandles || sig.holdingCandles || 0,
+                    holdingCandles:  restoredHoldingCandles,
+                    holdingEnabled:  restoredHoldingEnabled,
                     tradeStartTime:  trade.tradeStartTime || sig.entryTime || trade.timestamp || Date.now(),
                     softwareSLTP:    isSoftware,
                     stopLoss:        trade.stopLoss    || sig.stopLoss    || null,
@@ -195,6 +229,46 @@ async function initializeMonitor() {
 
 initializeMonitor();
 
+// ── WS price watcher — start immediately so price is cached before first signal ──
+// startPriceWatcher is only available on MexcClient (not BinanceClient).
+// It subscribes to MEXC's push.ticker WebSocket and caches the price in memory.
+// When a signal arrives, getLivePrice() returns the cached value at 0ms instead
+// of calling getPrice() REST (~200ms round-trip).
+if (typeof exchangeClient.startPriceWatcher === 'function') {
+    // Watch all symbols configured — BTCUSDT by default, plus anything in WATCHED_SYMBOLS env
+    const watchSymbols = (process.env.WATCHED_SYMBOLS || 'BTCUSDT')
+        .split(',').map(s => s.trim()).filter(Boolean);
+    exchangeClient.startPriceWatcher(watchSymbols);
+    logger.info(`📡 WS price watcher started for: ${watchSymbols.join(', ')}`);
+}
+
+// Pre-connect MEXC browser bot (non-blocking — will retry on first request)
+if (MEXC_BROWSER_MODE && mexcBot) {
+    // Keep-alive must never refresh while a position is open (would detach frame)
+    mexcBot.setPositionChecker(() => monitor.monitoredPositions.size > 0);
+
+    // ── UI close handler ─────────────────────────────────────────────────────
+    // ALL forced closes (holding-candle, emergency) go through Puppeteer Flash
+    // Close — never through the REST API.  REST market orders on MEXC execute at
+    // spot price and bypass the exchange's own TP limit order, causing large slippage.
+    monitor.setUICloseHandler(async (symbol, side) => {
+        if (!mexcBot.page || mexcBot.page.isClosed()) await mexcBot.connect();
+        await mexcBot.closeTrade({ symbol, direction: side, flash: true });
+    });
+
+    // ── UI TP/SL update handler ───────────────────────────────────────────────
+    // CTC break-even SL moves and all in-monitor SL/TP updates go through
+    // Puppeteer (mexcBot.updateTpSl) — zero REST API calls in browser mode.
+    monitor.setUIUpdateTpSlHandler(async (symbol, direction, tpPrice, slPrice) => {
+        if (!mexcBot.page || mexcBot.page.isClosed()) await mexcBot.connect();
+        await mexcBot.updateTpSl({ symbol, direction, tpPrice: tpPrice || undefined, slPrice: slPrice || undefined });
+    });
+
+    mexcBot.connect()
+        .then(() => logger.info('🤖 MEXC Browser Bot connected in-process'))
+        .catch(err => logger.warn(`⚠️  MEXC Browser Bot pre-connect skipped: ${err.message} — will retry on first trade`));
+}
+
 // ─────────────────────────────────────────────
 //  API Routes
 // ─────────────────────────────────────────────
@@ -204,8 +278,8 @@ initializeMonitor();
  */
 app.get('/api/status', async (req, res) => {
     try {
-        const balance = await binanceClient.getBalance();
-        const positions = await binanceClient.getPositions();
+        const balance = await exchangeClient.getBalance();
+        const positions = await exchangeClient.getPositions();
         const activePositions = positions.filter(p => parseFloat(p.positionAmt) !== 0);
         const monitorStatus = monitor.getStatus();
         const stats = await storage.getStatistics();
@@ -235,7 +309,7 @@ app.get('/api/status', async (req, res) => {
  */
 app.get('/api/symbols', async (req, res) => {
     try {
-        const symbols = await binanceClient.getAvailableSymbols();
+        const symbols = await exchangeClient.getAvailableSymbols();
         res.json({ success: true, data: symbols });
     } catch (error) {
         logger.error('Error getting symbols:', error.message);
@@ -248,7 +322,7 @@ app.get('/api/symbols', async (req, res) => {
  */
 app.get('/api/price/:symbol', async (req, res) => {
     try {
-        const price = await binanceClient.getPrice(req.params.symbol);
+        const price = await exchangeClient.getPrice(req.params.symbol);
         res.json({ success: true, data: { price } });
     } catch (error) {
         logger.error('Error getting price:', error.message);
@@ -261,16 +335,12 @@ app.get('/api/price/:symbol', async (req, res) => {
  */
 app.get('/api/symbol-info/:symbol', async (req, res) => {
     try {
-        const symbolInfo = await binanceClient.getSymbolInfo(req.params.symbol);
-        const exchangeInfo = await binanceClient.client.futuresExchangeInfo();
-        const fullSymbolInfo = exchangeInfo.symbols.find(s => s.symbol === req.params.symbol);
+        const symbolInfo   = await exchangeClient.getSymbolInfo(req.params.symbol);
+        const maxLeverage  = await exchangeClient.getMaxLeverage(req.params.symbol);
 
         res.json({
             success: true,
-            data: {
-                ...symbolInfo,
-                maxLeverage: fullSymbolInfo?.leverage || 150
-            }
+            data: { ...symbolInfo, maxLeverage }
         });
     } catch (error) {
         logger.error('Error getting symbol info:', error.message);
@@ -342,8 +412,8 @@ app.post('/api/trade', async (req, res) => {
         }
 
         // Validate leverage range
-        if (signal.leverage < 1 || signal.leverage > 150) {
-            return res.status(400).json({ success: false, error: 'Leverage must be between 1 and 150' });
+        if (signal.leverage < 1 || signal.leverage > 500) {
+            return res.status(400).json({ success: false, error: 'Leverage must be between 1 and 500' });
         }
 
         // Validate risk mode
@@ -354,11 +424,222 @@ app.post('/api/trade', async (req, res) => {
         // Set default orderType
         if (!signal.orderType) signal.orderType = 'MARKET';
 
+        // ── Position deduplication guard ─────────────────────────────────────
+        // If a position for this symbol is already being monitored, reject the
+        // trade with 409.  This is the last-resort safety net against duplicate
+        // trades caused by EC2 retrying a signal that the Mac already executed
+        // (but whose response timed out before EC2 received it).
+        //
+        // The EC2 side treats 409 as a non-retryable error (HTTP status is not
+        // in the retryable list), so it stops retrying immediately.
+        if (monitor.monitoredPositions.has(signal.symbol)) {
+            const existing = monitor.monitoredPositions.get(signal.symbol);
+            logger.warn(`🚫 [DeDup] Rejected duplicate signal for ${signal.symbol} — ` +
+                `${existing.side} position already open (entered @ ${existing.entryPrice}). ` +
+                `EC2 may have retried a signal whose first response was delayed.`);
+            return res.status(409).json({
+                success: false,
+                error: `Duplicate signal rejected: a ${existing.side} position for ${signal.symbol} ` +
+                    `is already open (entry ${existing.entryPrice}). ` +
+                    `Close the existing position before opening another.`
+            });
+        }
+
+        // ── MEXC Browser Bot path (in-process, zero extra hops) ───────────────
+        if (MEXC_BROWSER_MODE && mexcBot) {
+            // ── Precision timing — every step logged so we can pinpoint latency ──
+            const receivedAt = Date.now();
+            logger.info(`📨 [TIMING] Signal received for ${signal.symbol} at ${new Date(receivedAt).toISOString()}`);
+            // ── Upstream latency: time from signal generation → bot received ────
+            if (signal.entryTime && signal.entryTime > 0) {
+                const upstreamMs = receivedAt - signal.entryTime;
+                logger.info(`🌐 [TIMING] Upstream latency: ${upstreamMs}ms (${(upstreamMs/1000).toFixed(2)}s) | signal generated at ${new Date(signal.entryTime).toISOString()}`);
+            }
+
+    // ── Resolve side (pure computation — no I/O) ──────────────────────────
+    let side = signal.side;
+    if (!side && signal.direction) side = signal.direction === 'BUY' ? 'LONG' : 'SHORT';
+    if (!side) side = 'LONG';
+    const direction = signal.direction || (side === 'LONG' ? 'BUY' : 'SELL');
+
+    // ── STEP 1: Fire REST kline IMMEDIATELY — parallel pipeline ───────────
+    // Promise is started here at T=0ms and runs concurrently with STEP 2
+    // (bot connection check). We await the result in STEP 3 below.
+    //
+    // WHY ALWAYS REST — NEVER WS CACHE:
+    //   The WS push.kline message for a NEW 3m candle fires ~200ms after candle open.
+    //   Signals fire at T=0ms of the new candle. In that window getCandleOpen() = null
+    //   → code falls back to the live ticker, which has already moved.
+    //   Observed: ticker=65308 vs true candle open=65255 → SL 53pts too tight.
+    //
+    // WHY NEVER signal payload prices (entry/price from capie):
+    //   capie-mvp is trained on Binance.US spot data. MEXC futures has a 20-80 USDT
+    //   basis vs Binance.US. Any payload price would misplace SL/TP by that spread.
+    //
+    // LATENCY IMPACT (parallel trick):
+    //   REST kline ~80-150ms. But it starts HERE and runs in parallel with STEP 2.
+    //   • Bot already connected: kline REST waits ~80-150ms → total ~680ms (still <1s)
+    //   • Bot needs reconnect (~300ms): kline REST FINISHES DURING reconnect → +0ms
+    let currentPrice = null;
+    const _klinePromise = (typeof exchangeClient.getCandleOpenREST === 'function')
+        ? exchangeClient.getCandleOpenREST(signal.symbol).catch(() => 0)
+        : Promise.resolve(0);
+    logger.info(`🔌 [TIMING] REST kline fired at T=0 (parallel) | since receive: ${Date.now() - receivedAt}ms`);
+
+    // ── STEP 2: Ensure bot connection is alive ────────────────────────────
+    // Three-level staleness check:
+    //   1. page reference is null
+    //   2. page.isClosed() — Puppeteer closed the page object
+    //   3. browser.connected=false — CDP WebSocket to Chrome has dropped silently.
+    //      Old code only checked isClosed(), which misses silent WS drops leaving
+    //      page.isClosed()=false while every page.evaluate() would throw.
+    //
+    // The background _healthProbe() (every 60s, added to MexcBrowserBot) calls
+    // connect() proactively so this branch should almost never be needed on a
+    // live signal. When it IS needed, explicit timing shows exactly how long it took.
+    const needsConnect = !mexcBot.page
+        || mexcBot.page.isClosed()
+        || !(mexcBot.browser?.connected ?? true);
+    if (needsConnect) {
+        const connectStart = Date.now();
+        logger.warn(`⚠️ [TIMING] Bot page stale at signal arrival — reconnecting… (${Date.now() - receivedAt}ms since signal)`);
+        await mexcBot.connect();
+        logger.info(`✅ [TIMING] Bot reconnected in ${Date.now() - connectStart}ms | total latency so far: ${Date.now() - receivedAt}ms`);
+    }
+
+    // ── STEP 3: Await the REST kline open fired at STEP 1 ────────────────
+    // The promise has been running in parallel since STEP 1. By now (after
+    // the synchronous side-resolution + STEP 2 bot check) most or all of the
+    // 80-150ms round-trip has already elapsed — await here adds near-zero wait.
+    //
+    // Fallback chain (if kline REST failed):
+    //   WS kline cache (getCandleOpen) → WS ticker cache (getLivePrice) → REST ticker
+    // The WS caches are acceptable SECONDARY fallbacks — we just don't want them
+    // as the PRIMARY source (they can be null or stale at T=0 of a new candle).
+    const klineAwaitStart = Date.now();
+    const klineOpen = await _klinePromise;
+    const klineWaitMs = Date.now() - klineAwaitStart;   // typically 0ms (already resolved)
+
+    if (klineOpen > 0) {
+        currentPrice = klineOpen;
+        logger.info(
+            `⚡ [TIMING] REST kline open: ${currentPrice}` +
+            ` (parallel — awaited in ${klineWaitMs}ms) | since receive: ${Date.now() - receivedAt}ms`
+        );
+    } else {
+        // Kline REST failed — secondary fallbacks
+        logger.warn(`⚠️  [TIMING] REST kline failed — using WS cache fallback`);
+        const wsCandle  = typeof exchangeClient.getCandleOpen === 'function'
+            ? exchangeClient.getCandleOpen(signal.symbol)  : null;
+        const wsTicker  = typeof exchangeClient.getLivePrice === 'function'
+            ? exchangeClient.getLivePrice(signal.symbol)   : null;
+        currentPrice = wsCandle || wsTicker || null;
+
+        if (wsCandle)       logger.info(`⚡ [TIMING] WS kline cache: ${currentPrice} (fallback) | since receive: ${Date.now() - receivedAt}ms`);
+        else if (wsTicker)  logger.info(`⚡ [TIMING] WS ticker cache: ${currentPrice} (fallback) | since receive: ${Date.now() - receivedAt}ms`);
+    }
+
+    // Absolute last resort: REST ticker (only if kline REST + all WS caches failed)
+    if (!currentPrice) {
+        const restStart = Date.now();
+        currentPrice = await exchangeClient.getPrice(signal.symbol);
+        logger.info(`⏱️ [TIMING] REST ticker (last resort): ${Date.now() - restStart}ms | since receive: ${Date.now() - receivedAt}ms`);
+    }
+
+    const { stopLoss: slPrice, takeProfit1: tpPrice } = executor.resolveSLTP(currentPrice, side, signal);
+
+            logger.info(`🤖 Browser Bot: ${direction} ${signal.symbol} @ ${currentPrice} | SL=${slPrice} TP=${tpPrice} margin=$${signal.marginDollar}`);
+
+            const tradeParams = {
+                direction,
+                marginUsdt: signal.marginDollar,
+                leverage:   signal.leverage,
+                tpPrice,
+                slPrice
+            };
+
+            // Auto-recover on detached frame (MEXC page navigated while idle)
+            const execStart = Date.now();
+            try {
+                await mexcBot.placeTrade(tradeParams);
+            } catch (botErr) {
+                if (/detached Frame|Execution context was destroyed|Cannot find context|Target closed/i.test(botErr.message)) {
+                    logger.warn(`⚠️  Browser frame detached — reloading page and retrying… (${botErr.message})`);
+                    try {
+                        await mexcBot.reconnect();
+                        await mexcBot.placeTrade(tradeParams);
+                        logger.info('✅ Browser Bot recovered and trade executed on retry');
+                    } catch (retryErr) {
+                        throw new Error(`Browser Bot failed after reconnect: ${retryErr.message}`);
+                    }
+                } else {
+                    throw botErr;
+                }
+            }
+            const totalMs = Date.now() - receivedAt;
+            logger.info(`⏱️ [TIMING] placeTrade DOM: ${Date.now() - execStart}ms | ✅ total signal→filled: ${totalMs}ms (${(totalMs/1000).toFixed(1)}s)`);
+
+            const tradeStartTime = signal.entryTime || Date.now();
+            // CTC defaults to ON — signal provider enables it per trade; only
+            // explicitly set ctcEnabled:false in the payload to disable it.
+            const ctcEnabled     = signal.ctcEnabled     ?? true;
+            const ctcTrigger     = signal.ctcTrigger     ?? 0.5;
+            // holdingCandles from signal — 0 means no holding-candle limit
+            const holdingCandles = signal.holdingCandles ?? 0;
+
+            // Notional = margin × leverage — needed for correct MEXC fee calculation
+            // MEXC charges 0.01% (0.0001) per execution leg, not on pnl.
+            const notional = (signal.marginDollar || 0) * (signal.leverage || 1);
+
+            // ── Pre-generate tradeId so the response is not blocked by S3 ──
+            const tradeId = crypto.randomUUID();
+
+            // ── Fire-and-forget S3 save — does NOT block the HTTP response ──
+            // softwareSLTP=false: MEXC handles TP/SL via its own exchange stop orders.
+            // If we set it true, the software checker fires a REST market close on TP hit
+            // which bypasses MEXC's limit TP order and causes severe slippage (-$37 vs -$6).
+            storage.saveTrade({
+                id: tradeId,
+                symbol: signal.symbol, side, orderType: 'MARKET',
+                price: currentPrice, stopLoss: slPrice, takeProfit1: tpPrice,
+                rr: signal.rr || null, ctcEnabled, ctcTrigger,
+                holdingCandles, tradeStartTime, signal, status: 'open', softwareSLTP: false
+            }).catch(err => logger.error(`S3 save failed for ${tradeId}:`, err.message));
+
+            monitor.addPosition(signal.symbol, {
+                side, entryPrice: currentPrice, orderType: 'MARKET',
+                ctcEnabled, ctcTrigger, holdingCandles, tradeStartTime,
+                // ctcBasePrice = MEXC kline WS candle open (getCandleOpen()).
+                // NEVER use signal.price / signal.entry — those come from Binance spot
+                // which has a non-trivial basis vs MEXC futures and would misplace the
+                // CTC trigger.  currentPrice is already getCandleOpen() || getLivePrice()
+                // i.e. the MEXC-native candle open.  No signal payload price is used.
+                ctcBasePrice: currentPrice,
+                softwareSLTP: false, stopLoss: slPrice, takeProfit1: tpPrice,
+                notional // margin × leverage for correct MEXC fee calculation
+            });
+
+            logger.info(`✅ Browser Bot trade executed — ID: ${tradeId}`);
+            return res.json({
+                success: true,
+                data: {
+                    tradeId, symbol: signal.symbol, side, direction,
+                    price: currentPrice, stopLoss: slPrice, takeProfit1: tpPrice,
+                    ctcEnabled, ctcTrigger, holdingCandles, tradeStartTime
+                }
+            });
+        }
+        // ─────────────────────────────────────────────────────────────────────
+
         // Execute trade
         const result = await executor.executeTrade(signal);
 
-        // Save trade to storage with all new fields
-        const tradeId = await storage.saveTrade({
+        // ── Pre-generate tradeId so the response is not blocked by S3 ──
+        const tradeId = crypto.randomUUID();
+
+        // ── Fire-and-forget S3 save — does NOT block the HTTP response ──
+        storage.saveTrade({
+            id: tradeId,
             ...result,
             signal,
             status: signal.orderType === 'MARKET' ? 'open' : 'pending',
@@ -366,7 +647,7 @@ app.post('/api/trade', async (req, res) => {
             ctcTrigger: result.ctcTrigger,
             holdingCandles: result.holdingCandles,
             tradeStartTime: result.tradeStartTime
-        });
+        }).catch(err => logger.error(`S3 save failed for ${tradeId}:`, err.message));
 
         // Resolve side for monitor (direction → side mapping)
         const monitorSide = result.side;
@@ -381,6 +662,10 @@ app.post('/api/trade', async (req, res) => {
                 ctcTrigger:     result.ctcTrigger,
                 holdingCandles: result.holdingCandles,
                 tradeStartTime: result.tradeStartTime,
+                // ctcBasePrice = MEXC getCandleOpen() WS price already resolved into currentPrice.
+                // result.price is the fill price; for CTC we need the candle open.
+                // Never use signal.price/signal.entry (Binance spot ≠ MEXC futures).
+                ctcBasePrice:   currentPrice || result.price,
                 // software SL/TP (testnet)
                 softwareSLTP:   result.softwareSLTP || false,
                 stopLoss:       result.stopLoss     || null,
@@ -422,11 +707,29 @@ app.get('/api/trades', async (req, res) => {
 });
 
 /**
+ * Cancel / hide a stale trade record
+ * PATCH /api/trades/:id/cancel
+ * Marks status = 'cancelled' in S3 so it disappears from the Trade History table.
+ * Does NOT close any exchange position.
+ */
+app.patch('/api/trades/:id/cancel', async (req, res) => {
+    try {
+        const { id } = req.params;
+        await storage.updateTrade(id, { status: 'cancelled', cancelledAt: Date.now() });
+        logger.info(`🗑️  Trade ${id} hidden (cancelled)`);
+        res.json({ success: true, message: `Trade ${id} hidden` });
+    } catch (error) {
+        logger.error(`Error cancelling trade ${req.params.id}:`, error.message);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
  * Get active positions enriched with SL/TP orders and monitor data
  */
 app.get('/api/positions', async (req, res) => {
     try {
-        const positions = await binanceClient.getPositions();
+        const positions = await exchangeClient.getPositions();
         const activePositions = positions.filter(p => parseFloat(p.positionAmt) !== 0);
         const monitorStatus = monitor.getStatus();
 
@@ -444,7 +747,7 @@ app.get('/api/positions', async (req, res) => {
                 tp1 = monitorPos.takeProfit1 || null;
             } else {
                 try {
-                    const orders = await binanceClient.getOpenOrders(symbol);
+                    const orders = await exchangeClient.getOpenOrders(symbol);
                     const slOrder = orders.find(o => o.type === 'STOP_MARKET');
                     if (slOrder) sl = parseFloat(slOrder.stopPrice);
 
@@ -460,6 +763,11 @@ app.get('/api/positions', async (req, res) => {
                 } catch (err) {
                     logger.debug(`Could not fetch orders for ${symbol}`);
                 }
+                // ── Fallback: MEXC browser-set TP/SL are embedded in the position
+                // and NOT returned as separate stop orders via getOpenOrders().
+                // Fall back to the values the bot computed and stored in the monitor.
+                if (!sl  && monitorPos.stopLoss)    sl  = monitorPos.stopLoss;
+                if (!tp1 && monitorPos.takeProfit1) tp1 = monitorPos.takeProfit1;
             }
 
             // PnL % with leverage
@@ -487,16 +795,20 @@ app.get('/api/positions', async (req, res) => {
                 }
             }
 
+            // Handle both Binance (unRealizedProfit) and MEXC (unrealizedProfit) field names
+            const pnl    = parseFloat(p.unRealizedProfit ?? p.unrealizedProfit ?? 0) || 0;
+            const margin = parseFloat(p.isolatedMargin   ?? p.initialMargin    ?? 0) || 0;
+
             return {
                 symbol,
                 side: isLongPos ? 'LONG' : 'SHORT',
                 quantity: Math.abs(parseFloat(p.positionAmt)),
                 entryPrice,
                 markPrice,
-                pnl: parseFloat(p.unRealizedProfit),
-                pnlPercent: ((parseFloat(p.unRealizedProfit) / parseFloat(p.isolatedMargin)) * 100).toFixed(2),
+                pnl,
+                pnlPercent: margin > 0 ? ((pnl / margin) * 100).toFixed(2) : '0.00',
                 leveragedPnlPercent,
-                margin: parseFloat(p.isolatedMargin),
+                margin,
                 leverage: parseFloat(p.leverage),
                 stopLoss: sl,
                 takeProfit1: tp1,
@@ -515,7 +827,9 @@ app.get('/api/positions', async (req, res) => {
                 ctcTriggerPrice: monitorPos.ctcTriggerPrice  || null,
                 // Software SL/TP mode info
                 softwareSLTP:    monitorPos.softwareSLTP     || false,
-                tpHit:           monitorPos.tpHit            || false
+                tpHit:           monitorPos.tpHit            || false,
+                // Manual mode — user has taken over this trade, bot hands-off
+                manualMode:      monitorPos.manualMode       || false
             };
         }));
 
@@ -533,31 +847,73 @@ app.post('/api/close/:symbol', async (req, res) => {
     try {
         const symbol = req.params.symbol;
 
-        // Capture PnL before closing
-        const positions = await binanceClient.getPositions(symbol);
+        // Capture snapshot PnL and notional BEFORE closing
+        const positions = await exchangeClient.getPositions(symbol);
         const position = positions.find(p => p.symbol === symbol && parseFloat(p.positionAmt) !== 0);
-        const pnl = position ? parseFloat(position.unRealizedProfit) : 0;
-        const fees = Math.abs(pnl * 0.0004);
+        const snapshotPnl = position ? parseFloat(position.unRealizedProfit ?? position.unrealizedProfit ?? 0) : 0;
+
+        // ── MEXC Browser Bot close ─────────────────────────────────────────
+        if (MEXC_BROWSER_MODE && mexcBot) {
+            if (!mexcBot.page) await mexcBot.connect();
+            const isLong    = position ? parseFloat(position.positionAmt) > 0 : true;
+            const direction = isLong ? 'LONG' : 'SHORT';
+
+            const botResult = await mexcBot.closeTrade({ symbol, direction, flash: true });
+            monitor.removePosition(symbol);
+
+            // Wait 3s for MEXC to record the close before fetching realized PnL
+            await new Promise(r => setTimeout(r, 3000));
+
+            // Use exchange-confirmed realized PnL if available
+            let finalPnl = snapshotPnl;
+            let pnlSource = 'snapshot-unrealized';
+            try {
+                const histPnl = await exchangeClient.getHistoricalPnL(symbol);
+                if (histPnl !== null && histPnl !== undefined) {
+                    finalPnl  = histPnl;
+                    pnlSource = 'mexc-history-api';
+                    logger.info(`💰 Manual close PnL from MEXC history: $${finalPnl.toFixed(4)}`);
+                }
+            } catch (_) {}
+
+            // Correct MEXC fee: notional × 0.0002 (0.01% per leg × 2 legs)
+            const monData    = monitor.monitoredPositions.get(symbol); // may be removed already
+            const closeTrades = await storage.getAllTrades();
+            const openTrade  = closeTrades.find(t => t.symbol === symbol && t.status === 'open');
+
+            const tradeNotional = (openTrade?.signal?.marginDollar || 0) * (openTrade?.signal?.leverage || 1);
+            const fees    = tradeNotional > 0 ? tradeNotional * 0.0002 : Math.abs(snapshotPnl) * 0.05;
+            const netPnL  = finalPnl - fees;
+
+            if (openTrade) {
+                await storage.updateTrade(openTrade.id, {
+                    status: 'closed', closedAt: Date.now(),
+                    closeReason: 'manual', pnl: finalPnl, fees, netPnL, pnlSource
+                });
+                logger.info(`Trade ${openTrade.id} closed manually: gross=$${finalPnl.toFixed(2)} fees=$${fees.toFixed(2)} net=$${netPnL.toFixed(2)} [${pnlSource}]`);
+            }
+            return res.json({ success: true, data: botResult, pnl: finalPnl, fees, netPnL });
+        }
+        // ──────────────────────────────────────────────────────────────────
 
         const result = await executor.closePosition(symbol, 'manual');
         monitor.removePosition(symbol);
 
-        // Update trade record
+        // Update trade record — Binance/testnet path
         const trades = await storage.getAllTrades();
         const openTrade = trades.find(t => t.symbol === symbol && t.status === 'open');
+        const tradeNotional = (openTrade?.signal?.marginDollar || 0) * (openTrade?.signal?.leverage || 1);
+        const fees    = tradeNotional > 0 ? tradeNotional * 0.0002 : Math.abs(snapshotPnl) * 0.05;
+        const netPnL  = snapshotPnl - fees;
         if (openTrade) {
             await storage.updateTrade(openTrade.id, {
-                status: 'closed',
-                closedAt: Date.now(),
-                closeReason: 'manual',
-                pnl,
-                fees,
-                netPnL: pnl - fees
+                status: 'closed', closedAt: Date.now(),
+                closeReason: 'manual', pnl: snapshotPnl, fees, netPnL
             });
-            logger.info(`Trade ${openTrade.id} closed manually: PnL=$${pnl.toFixed(2)}`);
+            logger.info(`Trade ${openTrade.id} closed manually: PnL=$${snapshotPnl.toFixed(2)}`);
         }
 
-        res.json({ success: true, data: result, pnl, fees });
+        res.json({ success: true, data: result, pnl: snapshotPnl, fees, netPnL });
     } catch (error) {
         logger.error('Error closing position:', error.message);
         res.status(500).json({ success: false, error: error.message });
@@ -579,6 +935,47 @@ app.get('/api/monitor/holding', (req, res) => {
 });
 
 /**
+ * ─────────────────────────────────────────────
+ * MANUAL MODE ENDPOINT
+ * ─────────────────────────────────────────────
+ *
+ * Toggle manual-mode (Stop Monitor) for an active position.
+ * Body: { "enabled": true | false }
+ *
+ * When enabled=true:
+ *   - Bot suspends ALL automated actions: holding-candle close, CTC,
+ *     SL guardian, software SL/TP. The position stays tracked so the
+ *     dashboard still shows live PnL and the dedup guard stays active.
+ *   - User is responsible for managing the trade directly on MEXC.
+ * When enabled=false — normal bot behavior resumes immediately.
+ */
+app.post('/api/positions/:symbol/manual-mode', async (req, res) => {
+    try {
+        const { enabled } = req.body;
+        const { symbol } = req.params;
+
+        if (typeof enabled === 'undefined') {
+            return res.status(400).json({ success: false, error: 'Missing: enabled (boolean)' });
+        }
+
+        const result = monitor.setManualMode(symbol, !!enabled);
+        if (result) {
+            logger.info(`🎮 Manual mode ${!!enabled ? 'ENABLED' : 'DISABLED'} for ${symbol} via dashboard`);
+            res.json({
+                success: true,
+                message: `${symbol} manual mode ${!!enabled ? 'ENABLED — bot standing by' : 'DISABLED — bot resuming'}`,
+                data: { symbol, manualMode: !!enabled }
+            });
+        } else {
+            res.status(404).json({ success: false, error: `Position ${symbol} not found in monitor` });
+        }
+    } catch (error) {
+        logger.error(`Error toggling manual mode for ${req.params.symbol}:`, error.message);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+/**
  * Toggle per-position holding ON/OFF
  * Body: { "enabled": true | false }
  * When re-enabled, immediately closes if holding limit already reached
@@ -594,6 +991,20 @@ app.post('/api/positions/:symbol/holding', async (req, res) => {
 
         const result = await monitor.setPositionHolding(symbol, !!enabled);
         if (result) {
+            // ── Persist holdingEnabled to S3 so it survives server restart ──
+            // Without this, a manual "disable holding" toggle is lost on restart
+            // because initializeMonitor re-derives holdingEnabled from holdingCandles > 0.
+            try {
+                const trades    = await storage.getAllTrades();
+                const openTrade = trades.find(t => t.symbol === symbol && t.status === 'open');
+                if (openTrade) {
+                    await storage.updateTrade(openTrade.id, { holdingEnabled: !!enabled });
+                    logger.info(`💾 holdingEnabled=${!!enabled} persisted to trade ${openTrade.id}`);
+                }
+            } catch (persistErr) {
+                logger.warn(`⚠️ Could not persist holdingEnabled for ${symbol}: ${persistErr.message}`);
+            }
+
             res.json({
                 success: true,
                 message: `${symbol} holding ${!!enabled ? 'ENABLED' : 'DISABLED'}`,
@@ -714,6 +1125,34 @@ app.post('/api/positions/:symbol/sl-tp', async (req, res) => {
             return res.status(400).json({ success: false, error: 'takeProfit1 must be > 0' });
         }
 
+        // ── MEXC Browser Bot: update TP/SL via UI ─────────────────────────
+        if (MEXC_BROWSER_MODE && mexcBot) {
+            if (!mexcBot.page) await mexcBot.connect();
+            const posData   = monitor.monitoredPositions.get(symbol);
+            const direction = posData?.side || 'LONG';
+            const botResult = await mexcBot.updateTpSl({
+                symbol,
+                direction,
+                tpPrice: newTP || undefined,
+                slPrice: newSL || undefined
+            });
+            // Sync monitor in-memory state so the dashboard reflects new values
+            if (posData) {
+                monitor.monitoredPositions.set(symbol, {
+                    ...posData,
+                    ...(newSL !== null ? { stopLoss:    newSL } : {}),
+                    ...(newTP !== null ? { takeProfit1: newTP } : {})
+                });
+            }
+            logger.info(`✏️ SL/TP updated via browser bot for ${symbol}: SL=${newSL} TP=${newTP}`);
+            return res.json({
+                success: true,
+                message: `SL/TP updated for ${symbol}`,
+                data: { newSL, newTP, ...botResult }
+            });
+        }
+        // ──────────────────────────────────────────────────────────────────
+
         const result = await monitor.updateSLTP(symbol, newSL, newTP);
 
         if (result.success) {
@@ -745,21 +1184,67 @@ app.get('/api/statistics', async (req, res) => {
     }
 });
 
+// ── /api/ping — lightweight keep-alive probe ─────────────────────────────────
+//
+//  Used by signalAlertEngine.js ConnectionWarmer on EC2.
+//
+//  WHY NOT /api/status:
+//    /api/status calls getBalance() + getPositions() (REST round-trip to MEXC).
+//    At candle-close time MEXC is busy; those calls can take 5+ seconds.
+//    The background warmer interval lands at exactly T+0.5s after every candle
+//    close (startup offset makes the 30s timer align with each 3-min boundary).
+//    With maxSockets:1 on the EC2 agent, the warmer holds the ONLY socket for
+//    5+ seconds — the trade POST arriving at T=0 is QUEUED behind it.
+//    When the 5-second axios timeout kills the warmer request, the socket is
+//    destroyed; the trade then needs a brand-new SSH channel: ~6.7s cold start.
+//
+//  FIX:
+//    /api/ping returns {ok:true} in < 1ms (zero MEXC API calls, no auth needed).
+//    The warmer completes before the trade even arrives → socket stays alive and
+//    free → trade reuses the warm socket → < 0.1s connection overhead.
+//
+//  No auth token required: there is nothing sensitive to protect here; the
+//  endpoint reveals only the server timestamp.
+// ─────────────────────────────────────────────────────────────────────────────
+app.get('/api/ping', (_req, res) => {
+    res.json({ ok: true, ts: Date.now() });
+});
+
 // Start server
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     logger.info(`🌐 Dashboard server running on http://localhost:${PORT}`);
     logger.info(`📊 Open your browser to access the dashboard`);
 });
 
-// Handle graceful shutdown
-process.on('SIGINT', () => {
-    logger.info('\n🛑 Shutting down dashboard server...');
-    monitor.stop();
-    process.exit(0);
-});
+// Keep HTTP keep-alive sockets open for 65s.
+// The SSH reverse-tunnel connection warmer on EC2 pings every 30s using the
+// same persistent socket.  Node.js defaults keepAliveTimeout to 5s, which
+// closes the socket before the next ping arrives → ECONNABORTED on every
+// ping → no warming benefit.  65s > 30s interval ensures the socket stays
+// alive between pings so the warmer always reuses it (0ms connection cost).
+server.keepAliveTimeout = 65000;  // 65s — survives one 30s ping interval
+server.headersTimeout   = 66000;  // must be slightly > keepAliveTimeout
 
-process.on('SIGTERM', () => {
+// Handle graceful shutdown
+async function shutdown() {
     logger.info('\n🛑 Shutting down dashboard server...');
     monitor.stop();
+    if (mexcBot) {
+        try { await mexcBot.disconnect(); } catch (_) {}
+    }
     process.exit(0);
+}
+process.on('SIGINT',  shutdown);
+process.on('SIGTERM', shutdown);
+
+// ── Crash safety net — log the actual error before dying ────────────────────
+process.on('uncaughtException', (err) => {
+    logger.error(`💀 UNCAUGHT EXCEPTION: ${err.message}\n${err.stack}`);
+    process.exit(1);
+});
+process.on('unhandledRejection', (reason, promise) => {
+    const msg = reason instanceof Error ? reason.message : String(reason);
+    const stk = reason instanceof Error ? reason.stack  : '';
+    logger.error(`💀 UNHANDLED REJECTION: ${msg}\n${stk}`);
+    process.exit(1);
 });
